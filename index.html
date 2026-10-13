@@ -1761,28 +1761,46 @@ caption,.caption{font-size:12px;color:#617787;line-height:1.5}figure,.figure{mar
 .publication-note{background:#f2f8fa;border-left:4px solid #21858d;padding:15px 18px;margin:18px 0;border-radius:0 6px 6px 0;font-size:14px}
 .audit-note{border:1px solid #cfdfdb;background:#f4faf7;color:#215647;padding:16px 18px;border-radius:8px;margin:23px 0}
 .audit-note strong{color:#12543e}.small-meta{font-size:12px;color:#5f7281}
+.report-links{display:flex;flex-wrap:wrap;align-items:center;gap:7px 17px;color:#65798a;font-size:12px;margin:5px 0 13px;padding-bottom:15px;border-bottom:1px solid var(--line)}
+.report-links a{font-size:12px;text-decoration:none;font-weight:600}.report-keywords{font-size:12.5px;color:#60788a;margin:2px 0 24px}.report-keywords strong{color:#18465b}
 pre:not(.source-excerpt pre){border-radius:6px!important;font-size:12px!important}code{font-family:Consolas,'Liberation Mono',monospace}
 @media(max-width:760px){.main-container{padding:22px 19px 60px;box-shadow:none}h1.title{font-size:31px!important}h1:not(.title){font-size:26px}.metric{flex:1 1 145px}table{display:block;overflow-x:auto}}
 </style>
+<div class="report-links">
+<span>Department of Mathematics and Statistics, University of
+Toledo</span><span>Research report · October
+2026</span><a href="https://github.com/adongo123/Wearable_Accelerometry_Imputation" target="_blank" rel="noopener noreferrer">Repository
+and aggregate results
+↗</a><a href="#reproducibility-and-verification">Reproducibility
+statement ↓</a>
+</div>
 <div id="abstract" class="section level1">
 <h1>Abstract</h1>
-<p>Missing wrist-worn accelerometry measurements are routinely
-reconstructed before analysis, yet the method with the smallest
-prediction error may not preserve regression inference. We evaluated
-linear interpolation, hierarchical time-of-day means, <span class="math inline">\(k\)</span>-nearest neighbors, and random forest
-using recorded hourly NHANES 2011–2014 accelerometry values as reference
-observations. Artificial 1-, 3-, and 6-hour gaps were imposed on
-complete eight-hour windows selected from 3,635 participants across 20
-masking replications. We compared hourly reconstruction error,
-eight-hour exposure error, and age- and sex-adjusted regression
-estimation using 200 simulated outcomes per mask. The conditional
-Frisch–Waugh–Lovell projection characterizes distortion of the fitted
-activity coefficient. A separate fixed-mask null-effect experiment, an
-outcome-aware multiple-imputation sensitivity analysis, and an observed
-BMI application extend the investigation. This site reports results
-drawn from the original archived files and executes reproducibility
-checks against the saved manuscript tables during a local R Markdown
-render.</p>
+<p>Missing wrist-worn accelerometry measurements are frequently
+reconstructed before downstream analysis, but lower reconstruction error
+does not necessarily imply valid regression inference. We compared
+linear interpolation, hierarchical time-of-day means, <span class="math inline">\(k\)</span>-nearest neighbors (kNN), and random
+forest using recorded hourly NHANES 2011–2014 activity summaries as
+reference measurements. Artificial 1-, 3-, and 6-hour gaps were
+introduced into complete eight-hour windows selected from 3,635
+participants across 20 masking replications. Performance was assessed
+using hourly and participant-level exposure errors and age- and
+sex-adjusted regression estimates from 200 simulated outcomes per
+replication (4,000 fits per method–gap combination). For six-hour gaps,
+random forest achieved the lowest hourly root mean squared error (RMSE;
+446.53), but its mean activity coefficient was 0.5536 (true value 0.5)
+and nominal 95% confidence-interval coverage was 28.82%. kNN had a
+higher hourly RMSE (463.43), a mean coefficient of 0.5057, and 95.10%
+coverage. A Frisch–Waugh–Lovell projection characterized this
+coefficient distortion. Separate null-effect, outcome-aware
+multiple-imputation, and observed BMI analyses examined related but
+distinct settings. The reported tables are generated from archived
+research outputs, with explicit checks against saved manuscript results;
+the website does not rerun the original simulations.</p>
+<div class="report-keywords">
+<strong>Keywords</strong>   Accelerometry · Missing data · Imputation ·
+Measurement error · Regression inference · NHANES · Reproducibility
+</div>
 <div class="research-banner">
 <div class="pill-note" style="color:#94d6d5;margin:0">
 Research finding
@@ -1823,27 +1841,28 @@ Outcome fits per configuration
 </div>
 <div class="metric">
 <div class="num">
-81
+16
 </div>
 <div class="lbl">
-Archived original R scripts
+Public aggregate verification checks
 </div>
 </div>
 </div>
-<p>The inputs below are <strong>not copied files</strong>. They are the
-actual output tables stored in the original research archive. Scripts
-<code>70.R</code> and <code>72.R</code> created the primary summaries,
-and script <code>81.R</code> created the saved manuscript tables. See
-the script inventory later on this page.</p>
+<p><strong>Analysis provenance.</strong> All primary results below are
+calculated from the original archived summaries. Scripts
+<code>70.R</code> and <code>72.R</code> generated the principal
+reconstruction and regression outputs, and <code>81.R</code> generated
+manuscript Tables 1 and 2. The site renders the results and checks their
+consistency without repeating model training or outcome simulations.</p>
 </div>
 <div id="primary-results" class="section level1">
 <h1>Primary results</h1>
 <div id="principal-six-hour-comparison" class="section level2">
 <h2>Principal six-hour comparison</h2>
-<p>The six-hour missing-block setting provides the clearest contrast
-between reconstruction accuracy and inferential calibration. The table
-joins <strong>two original simulation summaries</strong> and is
-recalculated when the R Markdown report is rendered.</p>
+<p>The six-hour missing-block design exhibits the largest divergence
+between reconstruction accuracy and inferential calibration. Results
+below combine the original reconstruction and regression summaries.
+Values are calculated at render time from those saved outputs.</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>six_reconstruction <span class="ot">&lt;-</span> recon[recon<span class="sc">$</span>gap_hours <span class="sc">==</span> <span class="dv">6</span><span class="dt">L</span>,</span>
 <span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">&quot;gap_hours&quot;</span>, <span class="st">&quot;method&quot;</span>, <span class="st">&quot;mean_hourly_RMSE&quot;</span>, <span class="st">&quot;mean_exposure_RMSE&quot;</span>)]</span>
 <span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>six_inference <span class="ot">&lt;-</span> inference[inference<span class="sc">$</span>gap_hours <span class="sc">==</span> <span class="dv">6</span><span class="dt">L</span>,</span>
@@ -1932,9 +1951,9 @@ nominal 95% coverage.
 </div>
 <div class="publication-note">
 <strong>Interpretation.</strong> Random forest minimized hourly RMSE in
-this setting, while <span class="math inline">\(k\)</span>NN had much
-higher coverage of the known regression coefficient. This is a property
-of the evaluated design, not an across-dataset ranking of algorithms.
+this setting, while kNN had much higher coverage of the known regression
+coefficient. This is a property of the evaluated design, not an
+across-dataset ranking of algorithms.
 </div>
 </div>
 <div id="reconstruction-accuracy" class="section level2">
@@ -2085,9 +2104,9 @@ simulation summaries.
 </div>
 <p>In these archived results, random forest had the lowest hourly RMSE
 at each gap length. For six-hour blocks, random forest’s hourly RMSE was
-approximately 447, whereas the corresponding value for <span class="math inline">\(k\)</span>NN was approximately 463. The
-distinction between reconstruction quality and downstream inference
-becomes important below.</p>
+approximately 447, whereas the corresponding value for kNN was
+approximately 463. The distinction between reconstruction quality and
+downstream inference becomes important below.</p>
 </div>
 <div id="regression-inference" class="section level2">
 <h2>Regression inference</h2>
@@ -2245,10 +2264,10 @@ oracle uses the true exposure.</caption>
 </table>
 <p>With six-hour gaps, the lower-RMSE random forest reconstruction
 yielded a mean coefficient of approximately 0.554 and 28.8% coverage of
-nominal 95% confidence intervals. In contrast, <span class="math inline">\(k\)</span>NN yielded a mean coefficient of
-approximately 0.506 and 95.1% coverage. This comparison describes
-<strong>this particular simulation</strong>, not a universal ranking of
-these algorithms.</p>
+nominal 95% confidence intervals. In contrast, kNN yielded a mean
+coefficient of approximately 0.506 and 95.1% coverage. This comparison
+describes <strong>this particular simulation</strong>, not a universal
+ranking of these algorithms.</p>
 </div>
 <div id="coefficient-distortion-and-the-fwl-projection" class="section level2">
 <h2>Coefficient distortion and the FWL projection</h2>
@@ -2385,9 +2404,10 @@ horizontal dashed line marks lambda = 1.
 </div>
 <div id="comparison-with-saved-manuscript-tables" class="section level2">
 <h2>Comparison with saved manuscript tables</h2>
-<p>The following checks compare the higher-precision archived summaries
-against the already saved manuscript CSV tables. The tolerances reflect
-rounding in those tables, not uncertainty in the simulations.</p>
+<p>The manuscript-table audit compares archived full-precision summaries
+with the original reported Tables 1 and 2. Every check must pass for the
+document to render. Reported discrepancies reflect publication rounding,
+not Monte Carlo uncertainty.</p>
 <div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>compare_rounded <span class="ot">&lt;-</span> <span class="cf">function</span>(source, target, left, right,</span>
 <span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>                            <span class="at">multiplier =</span> <span class="dv">1</span>, <span class="at">tolerance =</span> <span class="fl">0.0051</span>) {</span>
 <span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>  joined <span class="ot">&lt;-</span> <span class="fu">merge</span>(source, target,</span>
@@ -3649,10 +3669,10 @@ different questions:</p>
 =\sqrt{\operatorname{mean}_{\mathrm{participants}}\big[(\widehat
 X-X)^2\big]}.
 \]</span></p>
-<p>The saved reconstruction-summary CSV has one row for each of the
-<strong>four methods times three gap lengths</strong>. We inspect that
-archival summary here without fitting any model; detailed reconstruction
-and regression results appear later in this page.</p>
+<p>The archived reconstruction summary contains the complete set of
+<strong>12 method–gap combinations</strong> (four methods and three gap
+lengths). Its structure and numerical values are validated without
+refitting an imputation model.</p>
 <div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>mask_summary_path <span class="ot">&lt;-</span> <span class="fu">file.path</span>(</span>
 <span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>  <span class="st">&quot;R results&quot;</span>, <span class="st">&quot;Final 2011-2014&quot;</span>, <span class="st">&quot;Inference&quot;</span>, <span class="st">&quot;Repeated masking&quot;</span>,</span>
 <span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>  <span class="st">&quot;all20_reconstruction_summary.csv&quot;</span></span>
@@ -3681,12 +3701,10 @@ and regression results appear later in this page.</p>
 <span id="cb18-26"><a href="#cb18-26" tabindex="-1"></a>    <span class="st">&quot;configurations, each summarized across 20 selections. No imputation&quot;</span>,</span>
 <span id="cb18-27"><a href="#cb18-27" tabindex="-1"></a>    <span class="st">&quot;or model refitting was performed during knitting.&quot;</span>)</span></code></pre></div>
 <pre><code>## PASS: original archived summary contains 12 distinct method--gap configurations, each summarized across 20 selections. No imputation or model refitting was performed during knitting.</code></pre>
-<p>For audit purposes, this chapter provides <strong>the original mask
-and model source code</strong>, the expected masked-value counts, and
-structural checks of the final saved outputs. These are not equivalent
-to independently rerunning all 20 iterations from raw NHANES data. That
-more demanding verification remains a separate reproducibility
-pathway.</p>
+<p>The documented masking rules, original source-code excerpts, expected
+withheld-value counts, and checks against saved results establish
+traceability of the implemented design. They do not constitute an
+independent rerun of the complete analysis from raw NHANES data.</p>
 </div>
 </div>
 <div id="outcome-generating-model-and-null-effect-sensitivity" class="section level1">
@@ -3869,11 +3887,10 @@ describe <strong>coefficient distortion conditional on the specified
 model</strong>, not a general ranking of interpolation, kNN, or forests.
 The relevant criterion is not hourly RMSE but a covariate-adjusted
 covariance-to-variance ratio.</p>
-<p>The previously loaded <code>recon</code> summary stores the mean
-<span class="math inline">\(\lambda\)</span> and mean projected
-coefficient across the 20 masking replications. The next verification
-compares those projections with the means of the 200 simulated outcomes
-per masking replication, as saved by script <code>72.R</code>.</p>
+<p>The archived reconstruction summary contains the mean <span class="math inline">\(\lambda\)</span> and corresponding projected
+coefficient over 20 masking replications. The numerical audit compares
+these projections with the empirical regression means from 200 outcomes
+per replication, saved by script <code>72.R</code>.</p>
 <div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>theory_path <span class="ot">&lt;-</span> <span class="fu">file.path</span>(</span>
 <span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>  checkpoint_dir, <span class="st">&quot;theory_alignment_summary.csv&quot;</span></span>
 <span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a>)</span>
@@ -4304,10 +4321,10 @@ to assess both.</p>
 </div>
 <div id="outcome-aware-mice-participant-level-sensitivity-study" class="section level1">
 <h1>Outcome-aware MICE: participant-level sensitivity study</h1>
-<p>This chapter documents a <strong>separate</strong> missing-exposure
-experiment from the original research archive. The principal analysis
-above deliberately removes <strong>hourly</strong> MIMS measurements
-from each eight-hour window and reconstructs them using four
+<p>This sensitivity analysis addresses a <strong>distinct</strong>
+missing-exposure experiment from the original research archive. The
+primary analysis withholds <strong>hourly</strong> MIMS measurements
+from eight-hour windows and reconstructs them using four
 single-imputation methods. Here, the missing target is the
 <strong>participant-level standardized eight-hour mean exposure
 itself</strong>. The imputation also includes the simulated outcome as
@@ -5162,7 +5179,7 @@ Original R source · 36.R<span class="source-meta">Lines 63–105</span>
 where <span class="math inline">\(r\)</span> is the selection number),
 the original code compares regression using the complete reference
 exposure with regression after hourly reconstruction using linear
-interpolation, hierarchical time-of-day means, <span class="math inline">\(k\)</span>NN (<span class="math inline">\(k=5\)</span>), and random forest. In <strong>this
+interpolation, hierarchical time-of-day means, kNN (<span class="math inline">\(k=5\)</span>), and random forest. In <strong>this
 earlier BMI application</strong> the forest is fitted with <strong>100
 trees</strong>, not the 200 trees used in the later combined-cycle
 primary study. The observed health outcome does not enter the four
@@ -5851,8 +5868,8 @@ clean-session rerun of the entire BMI workflow.</p>
 <p>The results demonstrate that optimizing pointwise reconstruction
 error does not, by itself, ensure valid downstream regression inference.
 Across the studied artificial gap lengths, random forest achieved the
-smallest hourly reconstruction RMSE, but <span class="math inline">\(k\)</span>NN was markedly better calibrated for
-the regression coefficient under the longest gap. The
+smallest hourly reconstruction RMSE, but kNN was markedly better
+calibrated for the regression coefficient under the longest gap. The
 Frisch–Waugh–Lovell projection links these outcomes to changes in the
 covariate-adjusted covariance and variance of the reconstructed activity
 exposure.</p>
@@ -5874,13 +5891,12 @@ measure bias relative to an unknown population coefficient.</p>
 </div>
 <div id="source-code-provenance" class="section level1">
 <h1>Source-code provenance</h1>
-<p>The original data, saved RDS checkpoints, and 81 numbered scripts
-remain in the <code>Paper1_Wearable_Imputation</code> research folder.
-This page renders the <strong>archived-result verification</strong>
-pathway only; it is not a clean-session execution of all upstream
-simulations.</p>
-<p>Key script references are listed here to help readers trace the
-outputs to their generating code.</p>
+<p>The original NHANES inputs, intermediate RDS checkpoints, and 81
+numbered R scripts have been retained in the research archive. The
+public report provides <strong>archived-result traceability</strong>,
+rather than claiming a new clean-session execution of all upstream
+analyses. The following inventory identifies the generating scripts for
+the reported results.</p>
 <div class="sourceCode" id="cb40"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" tabindex="-1"></a>script_map <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
 <span id="cb40-2"><a href="#cb40-2" tabindex="-1"></a>  <span class="st">`</span><span class="at">Original script</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">c</span>(<span class="st">&quot;40.R&quot;</span>, <span class="st">&quot;41.R&quot;</span>, <span class="st">&quot;43.R&quot;</span>, <span class="st">&quot;64.R&quot;</span>, <span class="st">&quot;70.R&quot;</span>, <span class="st">&quot;71.R&quot;</span>, <span class="st">&quot;72.R&quot;</span>, <span class="st">&quot;81.R&quot;</span>, <span class="st">&quot;62.R&quot;</span>, <span class="st">&quot;77.R&quot;</span>, <span class="st">&quot;78.R&quot;</span>, <span class="st">&quot;79.R&quot;</span>, <span class="st">&quot;80.R&quot;</span>, <span class="st">&quot;33.R&quot;</span>, <span class="st">&quot;34.R&quot;</span>, <span class="st">&quot;35.R&quot;</span>, <span class="st">&quot;36.R&quot;</span>, <span class="st">&quot;37.R&quot;</span>, <span class="st">&quot;38.R&quot;</span>),</span>
 <span id="cb40-3"><a href="#cb40-3" tabindex="-1"></a>  <span class="st">`</span><span class="at">Saved analysis/output</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">c</span>(</span>
@@ -6010,22 +6026,20 @@ selections</td>
 </tr>
 </tbody>
 </table>
-<p>For a public GitHub Pages site, build <code>index.html</code> locally
-with the original project folder intact. Then publish the HTML and the
-small saved CSV summaries required to reproduce the page. Large
-<code>.rds</code> checkpoints and the NHANES <code>.xpt</code> data
-should not be committed to Git indiscriminately; instead, provide their
-official download links or a documented research archive as
-appropriate.</p>
+<p>Original XPT inputs and intermediate participant-level checkpoints
+are not included in the public GitHub Pages release. The public
+repository contains the rendered report, source R Markdown, approved
+aggregate summaries, and a standalone verification script. The publicly
+distributed files support checks of the reported aggregate results but
+not a complete rerun of all imputation procedures.</p>
 </div>
 <div id="reproducibility-and-verification" class="section level1">
 <h1>Reproducibility and verification</h1>
-<p>This last chapter distinguishes <strong>three different
-claims</strong>. A website can display archived tables, a separate
-analyst can independently regenerate those tables from saved
-checkpoints, and a researcher can rerun the full computational pipeline
-from raw NHANES records. These are related but not equivalent levels of
-reproducibility.</p>
+<p>The verification evidence is reported at three levels: agreement of
+the displayed results with archived summaries, reproducibility from
+saved computational checkpoints, and execution of the entire
+data-processing and simulation pipeline from raw NHANES records. These
+are distinct levels of evidence and are not interchangeable.</p>
 <table>
 <colgroup>
 <col width="33%" />
@@ -6041,11 +6055,11 @@ reproducibility.</p>
 </thead>
 <tbody>
 <tr class="odd">
-<td align="left"><strong>Published-results traceability</strong></td>
-<td align="left">Each displayed table is linked to an original archived
-CSV, and numerical agreement with the manuscript is checked.</td>
-<td align="left">Publish the corresponding non-identifiable aggregate
-summaries.</td>
+<td align="left"><strong>Manuscript-results traceability</strong></td>
+<td align="left">Reported tables are linked to original archived CSV
+files and checked numerically against the manuscript.</td>
+<td align="left">Aggregate summary files and the standalone public
+verification script are included in the repository.</td>
 </tr>
 <tr class="even">
 <td align="left"><strong>Checkpoint reproducibility</strong></td>
@@ -6353,29 +6367,29 @@ simulation versions).</caption>
 </tbody>
 </table>
 </div>
-<div id="public-release-and-reproduction-boundaries" class="section level2">
-<h2>Public release and reproduction boundaries</h2>
-<p>GitHub Pages publishes the <strong>pre-rendered</strong>
-<code>index.html</code>. The site does not execute R code for visitors.
-Render locally while the original project is available, then run the
-accompanying <code>prepare_github_release_publication.R</code> from the
-original project folder. The accompanying versioned release helper
-copies the HTML, R Markdown source, the public verification script, and
-only the explicitly approved <em>aggregate</em> CSV results into a
-separate <code>github_pages_release_publication_v2</code> folder.</p>
-<p>The helper <strong>does not copy</strong> the NHANES XPT inputs, RDS
-checkpoints, individual participant measurements,
-<code>.Rhistory</code>, <code>.Rproj.user</code>, or arbitrary files
-from the original archive. Publishing source scripts 1–81 is a separate
-deliberate step after reviewing their file contents for private local
-paths and other sensitive information. The public verification script
-(<code>verify_public_results.R</code>) checks aggregate-output
-consistency with the saved manuscript tables and runs locally using the
-released CSV files. The public result tables can be regenerated from the
-shared aggregates, but the GitHub Pages repository <strong>alone is not
-a self-contained full computational reproduction</strong> until the
-complete source pipeline and archived inputs/checkpoints are made
-available and tested.</p>
+<div id="data-code-and-reproduction-boundaries" class="section level2">
+<h2>Data, code and reproduction boundaries</h2>
+<p>The <a href="https://github.com/adongo123/Wearable_Accelerometry_Imputation">public
+GitHub repository</a> contains the pre-rendered report
+(<code>index.html</code>), R Markdown source (<code>index.Rmd</code>), a
+standalone aggregate-results checker
+(<code>verify_public_results.R</code>), and approved summary CSV files.
+GitHub Pages serves the rendered HTML; <strong>it does not execute R in
+a reader’s browser</strong>. Using the public CSV files, the
+verification script performs 16 checks covering manuscript Tables 1 and
+2 and supplementary aggregate summaries, including the null, MICE, and
+BMI analyses. These checks were completed successfully before
+publication of this report.</p>
+<p>The local rendering pathway additionally validates selected original
+RDS checkpoints and file checksums. The public release excludes the
+NHANES XPT inputs, participant-level measurements, computational
+checkpoints, local RStudio files, and the unreviewed full set of
+numbered R scripts. Consequently, aggregate-result reproduction is
+available from the public files, whereas independently rerunning all
+original imputations and outcome simulations remains a separate
+computational task. The primary survey-cycle data are documented by <a href="https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2011/DataFiles/PAXHR_G.htm">NHANES
+2011–2012</a> and <a href="https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2013/DataFiles/PAXHR_H.htm">NHANES
+2013–2014</a>.</p>
 <div class="sourceCode" id="cb44"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" tabindex="-1"></a>original_script_count <span class="ot">&lt;-</span> <span class="fu">sum</span>(<span class="fu">file.exists</span>(script_paths))</span>
 <span id="cb44-2"><a href="#cb44-2" tabindex="-1"></a>checkpoints <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
 <span id="cb44-3"><a href="#cb44-3" tabindex="-1"></a>  checkpoint_paths,</span>
@@ -6438,11 +6452,11 @@ release</td>
 </table>
 <div class="sourceCode" id="cb45"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;PASS: public release preflight completed using existing files; no raw-data processing, imputation, or simulation was rerun.&quot;</span>)</span></code></pre></div>
 <pre><code>## PASS: public release preflight completed using existing files; no raw-data processing, imputation, or simulation was rerun.</code></pre>
-<p>The release should be checked in a browser before being made public.
-The local project and all numbered scripts must remain unchanged during
-preparation. Publishing the website does not make the underlying NHANES
-analysis nationally representative, and it does not turn the exploratory
-BMI findings into causal estimates.</p>
+<p>The report provides <strong>verification of archived aggregate
+results</strong>, not independent full-pipeline replication, nationally
+representative activity estimates, or causal BMI-effect identification.
+All primary estimates retain the assumptions and population scope
+described in the study design and limitations sections.</p>
 </div>
 </div>
 
