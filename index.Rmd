@@ -1,0 +1,1402 @@
+---
+title: "Reconstruction Accuracy Does Not Imply Inferential Validity"
+subtitle: "Evaluation of imputation methods for missing wrist-worn accelerometry data"
+author: "Robert Adongo"
+date: "October 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.width = 8, fig.height = 4.8, fig.align = "center"
+)
+
+# Auto-locate the UNZIPPED original research folder. This supports:
+#   (a) index.Rmd inside Paper1_Wearable_Imputation/
+#   (b) index.Rmd one or two folders above/below it
+#   (c) the add-on extracted next to the original project folder.
+# If your project is somewhere else, provide its absolute path here:
+project_root_override <- ""
+
+start_dir <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+ancestors <- c(start_dir, dirname(start_dir),
+               dirname(dirname(start_dir)))
+folder_name <- "Paper1_Wearable_Imputation"
+search_paths <- unique(c(
+  project_root_override,
+  ancestors,
+  file.path(ancestors, folder_name),
+  file.path(ancestors, folder_name, folder_name)
+))
+search_paths <- search_paths[nzchar(search_paths)]
+valid_paths <- search_paths[dir.exists(search_paths)]
+contains_project <- vapply(valid_paths, function(path) {
+  file.exists(file.path(path, "R results", "R scripts", "1.R")) &&
+    file.exists(file.path(path, "33.R"))
+}, logical(1))
+
+if (!any(contains_project)) {
+  stop(
+    "Cannot locate the UNZIPPED Paper1_Wearable_Imputation folder.\n",
+    "R Markdown started in: ", start_dir, "\n",
+    "Expected original file: R results/R scripts/1.R\n",
+    "Extract Paper1_Wearable_Imputation.zip first, or set\n",
+    "  project_root_override <- \"C:/your/path/Paper1_Wearable_Imputation\"\n",
+    "in the setup chunk. Do not point to the ZIP itself."
+  )
+}
+PROJECT_ROOT <- normalizePath(valid_paths[which(contains_project)[1]],
+                              winslash = "/", mustWork = TRUE)
+knitr::opts_knit$set(root.dir = PROJECT_ROOT)
+message("Using original research folder: ", PROJECT_ROOT)
+```
+
+# Introduction
+
+Wearable accelerometers provide objective summaries of movement, but the observed records may contain gaps. These gaps can be reconstructed using interpolation or statistical learning algorithms. However, the method that most accurately reconstructs an individual hourly measurement may not be the method that preserves regression coefficients or their confidence intervals.
+
+This website documents a semi-synthetic evaluation of missing wrist-worn accelerometry data. We retain the original [NHANES 2011--2012](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2011/DataFiles/PAXHR_G.htm) and [2013--2014](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2013/DataFiles/PAXHR_H.htm) hourly records as reference measurements, artificially mask some observations, and compare methods for recovering them.
+
+This page automatically locates the **unzipped original research folder**. It reads saved summary CSV files from their original locations under `R results/`, without duplicating or renaming files. Building this webpage does **not** rerun expensive imputation or outcome simulations. The original 81 numbered R scripts and intermediate results remain in their original locations.
+
+# Research question and study design
+
+**Research question:** Does lower hourly reconstruction error necessarily imply smaller regression coefficient bias and more reliable confidence intervals?
+
+The primary analysis used `r format(3635, big.mark = ",")` selected participants from the combined NHANES 2011--2014 cycles. For each of 20 masking replications, one complete eight-hour window was selected per participant. The second hour, hours two through four, or hours two through seven were artificially masked, producing gaps of 1, 3, or 6 consecutive hours. The four reconstruction methods were linear interpolation, time-of-day mean, $k$-nearest neighbors ($k=5$), and random forest.
+
+For each completed eight-hour window, the exposure was the average hourly activity:
+
+$$
+X_i = \frac{1}{8}\sum_{h=1}^{8} A_{ih}.
+$$
+
+Simulated continuous outcomes followed an age- and sex-adjusted linear model with the **true standardized activity coefficient** $\beta=0.5$. Each method--gap configuration was assessed in 20 masking replications and 200 outcome simulations per replication, giving 4,000 regression fits.
+
+The NHANES weights were not used in these methodological simulations. The reported performance measures therefore describe the selected cohort and simulation mechanism; they are **not nationally representative estimates**.
+
+
+# NHANES data preparation and reference windows
+
+This chapter documents how the **recorded NHANES hourly accelerometry data** became the reference measurements for the final 2011--2014 simulation. The workflow is traced to the original scripts, not reconstructed from the manuscript description alone. Only small archived results are loaded here; the expensive data preparation and imputation procedures are **not** executed during website rendering.
+
+## Input files and source measurements
+
+The study combines the NHANES 2011--2012 (`G`) and 2013--2014 (`H`) cycles. The archived raw inputs are the hourly physical-activity-monitor files (`PAXHR_G`, `PAXHR_H`), monitor header files (`PAXHD_G`, `PAXHD_H`), demographics files (`DEMO_G`, `DEMO_H`), and body-measures files (`BMX_G`, `BMX_H`). The primary reconstruction outcome is `PAXMTSH`: an **hourly sum of MIMS activity**, rather than raw acceleration sampled at 80 Hz.
+
+```{r original-input-manifest}
+original_data_files <- c(
+  "PAXHR_G.xpt", "PAXHR_H.xpt", "PAXHD_G.xpt", "PAXHD_H.xpt",
+  "DEMO_G.xpt", "DEMO_H.xpt", "BMX_G.xpt", "BMX_H.xpt"
+)
+original_data_paths <- file.path("Data", "Raw", original_data_files)
+if (!all(file.exists(original_data_paths))) {
+  stop("Missing NHANES raw file(s): ",
+       paste(original_data_paths[!file.exists(original_data_paths)], collapse = ", "))
+}
+raw_manifest <- data.frame(
+  `Original input` = original_data_paths,
+  `File size (MB)` = round(file.info(original_data_paths)$size / 1024^2, 2),
+  check.names = FALSE
+)
+knitr::kable(raw_manifest, caption = "Original NHANES data files present in the research archive. The XPT files are not loaded during this render.")
+```
+
+The NHANES hourly data documentation is available from the [2011--2012 survey cycle](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2011/DataFiles/PAXHR_G.htm) and the [2013--2014 cycle](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2013/DataFiles/PAXHR_H.htm). The header files are used to reconstruct time of day, and demographics supply age and sex. Body measurements are retained for the separate real-BMI application, not for constructing the primary synthetic outcome.
+
+## The original cleaning workflow
+
+The initial exploratory `Data_Cleaning.R` processed the 2013--2014 cycle. The final **combined-cycle** implementation was developed in scripts `40.R`, `41.R`, and `43.R`. We document the latter as the source of the final analytic cohort, with the subsequent repeated-window selection performed in `64.R`.
+
+```{r cleaning-provenance}
+preparation_sources <- data.frame(
+  `Original file` = c("Data_Cleaning.R", "40.R", "41.R", "43.R", "44.R", "63.R", "64.R"),
+  `Role in the original research` = c(
+    "Initial 2013--2014 cleaning and data exploration",
+    "Combine G/H hourly, header, demographic and body-measure files",
+    "Cycle-neutral cleaning, valid days, clean hours, time reconstruction",
+    "Final eight-hour candidate-window detector and combined-cycle eligibility",
+    "One-window-per-participant initial selection",
+    "Candidate window counts and repeated-selection checks",
+    "Final 20 replicated selections and archived reference exposures"
+  ), check.names = FALSE
+)
+knitr::kable(preparation_sources, caption = "Provenance of the NHANES preparation steps in the original code archive.")
+```
+
+The original scripts are available in `R results/R scripts/`, except for `Data_Cleaning.R`, which is at the top level. The excerpts below are **quoted directly from those scripts**. They explain the implemented rules; they are not executed a second time when the page is knitted.
+
+```{r show-original-source-helper, include=FALSE}
+show_source_excerpt <- function(script, start_line, end_line) {
+  script_file <- if (script %in% c("Data_Cleaning.R", "33.R")) {
+    script
+  } else {
+    file.path("R results", "R scripts", script)
+  }
+  lines <- readLines(script_file, warn = FALSE)
+  if (length(lines) < end_line) {
+    stop("Source excerpt is out of range: ", script_file)
+  }
+  cat("\n```r\n", paste(lines[start_line:end_line], collapse = "\n"),
+      "\n```\n\n", sep = "")
+}
+```
+
+### Daily wear and participant eligibility
+
+The combined-cycle cleaning function first attaches age from the demographics files and restricts the final analysis to participants **aged at least six years**. It considers monitoring days **2 through 8**, excluding the typically partial first and ninth days. For every available hour, wear minutes are the sum of awake-wear and sleep-wear minutes:
+
+$$
+W_{idh}=\mathrm{PAXWWMH}_{idh}+\mathrm{PAXSWMH}_{idh}.
+$$
+
+Daily wear time is obtained by summing these minutes across that monitoring day. A day is considered valid when it contains **at least 960 minutes (16 hours)** of wear. The code constructs all seven possible days for each participant, assigning zero wear to any completely absent day before counting valid days. A participant must have **at least four valid days**.
+
+Selected source lines from `41.R` make the last rule explicit:
+
+```{r original-eligibility-code, echo=FALSE, results='asis'}
+show_source_excerpt("41.R", 259, 281)
+```
+
+### Hour-level quality control
+
+For eligible participants, the original code defines a clean hour as one with all 60 minutes valid, no quality-control flag, no nonwear or unknown minutes, and a total of 60 minutes classified as awake or asleep wear:
+
+$$
+\begin{aligned}
+\mathrm{PAXVMH}&=60, & \mathrm{PAXQFH}&=0,\\
+\mathrm{PAXNWMH}&=0, & \mathrm{PAXUMH}&=0,\\
+\mathrm{PAXWWMH}+\mathrm{PAXSWMH}&=60.
+\end{aligned}
+$$
+
+```{r original-clean-hour-code, echo=FALSE, results='asis'}
+show_source_excerpt("41.R", 290, 313)
+```
+
+This clean-hour flag checks wear and quality fields. **Availability of `PAXMTSH` is additionally checked in the later final-window validation**, rather than being part of the clean-hour Boolean definition above. Keeping these steps distinct reflects the original implementation.
+
+### Recovering clock time and consecutive hours
+
+The monitor header variable `PAXFTIME` provides a first-recorded clock time for header records satisfying `PAXSTS == 1`. The original combined-cycle code parses this time and uses the sampling index `PAXSSNHP` to derive each hourly record's clock hour. At the documented sampling frequency of 80 Hz, consecutive hours are separated by
+
+$$
+60\times60\times80=288{,}000\ \text{samples}.
+$$
+
+The final eight-hour detector in `43.R` requires all eight hourly records to satisfy the clean-hour criterion, all eight to have a known reconstructed time of day, and successive start-sample indices to be separated by exactly 288,000 samples.
+
+```{r original-window-detector, echo=FALSE, results='asis'}
+show_source_excerpt("43.R", 76, 125)
+```
+
+## From candidate windows to repeated simulation samples
+
+Script `43.R` constructs the combined-cycle candidate eight-hour windows. Script `64.R` verifies that the eligible candidate pool contains **20,049 windows from 3,635 distinct participants** (these values are assertions in the original generating code). The pool is larger than the participant count because one person may contribute more than one candidate window.
+
+The final simulation randomly selects **one candidate window per participant in each of 20 replications**. The function in `64.R` uses the seed `20262000 + r` for replication `r`; thus, the same selection can be regenerated if the candidate pool is reconstructed in the same order. A previously generated one-window selection in `44.R` is an earlier stage, not the final 20-replication analysis.
+
+### Check the archived window selections (no simulation rerun)
+
+The following small archived files are loaded directly from the original folder. This verifies the final cohort, its cycle composition, the repeated selections, and reference-exposure completeness. **No random forest is fitted and no outcome is simulated.**
+
+```{r archived-window-verification}
+window_dir <- file.path("R results", "Final 2011-2014", "Inference", "Repeated masking")
+selection_csv <- file.path(window_dir, "selection_validation.csv")
+selected_rds <- file.path(window_dir, "selected_windows_20_replicates.rds")
+true_rds <- file.path(window_dir, "true_exposures_20_replicates.rds")
+window_inputs <- c(selection_csv, selected_rds, true_rds)
+if (!all(file.exists(window_inputs))) {
+  stop("Archived window-selection file(s) missing: ",
+       paste(window_inputs[!file.exists(window_inputs)], collapse = ", "))
+}
+
+selection_validation <- read.csv(selection_csv, check.names = FALSE)
+selected_windows <- readRDS(selected_rds)
+true_exposures <- readRDS(true_rds)
+
+stopifnot(
+  identical(sort(as.character(selection_validation$cycle)),
+            c("2011-2012", "2013-2014")),
+  all(selection_validation$replications == 20L),
+  all(selection_validation$minimum_participants ==
+      selection_validation$maximum_participants),
+  all(selection_validation$total_missing_starts == 0L),
+  sum(selection_validation$minimum_participants) == 3635L,
+  nrow(selected_windows) == 20L * 3635L,
+  nrow(true_exposures) == 20L * 3635L,
+  all(c("SEQN", "cycle", "replicate", "window_start") %in% names(selected_windows)),
+  all(c("SEQN", "cycle", "replicate", "X_true", "X_true_z",
+        "n_hours", "unique_hours", "all_clean",
+        "all_MIMS_observed", "all_clock_hours_known") %in% names(true_exposures)),
+  !anyNA(selected_windows$window_start),
+  !anyDuplicated(selected_windows[c("replicate", "SEQN")]),
+  length(unique(selected_windows$replicate)) == 20L,
+  all(true_exposures$n_hours == 8L),
+  all(true_exposures$unique_hours == 8L),
+  all(true_exposures$all_clean),
+  all(true_exposures$all_MIMS_observed),
+  all(true_exposures$all_clock_hours_known),
+  all(is.finite(true_exposures$X_true)),
+  all(is.finite(true_exposures$X_true_z))
+)
+
+selected_cycle_counts <- as.data.frame(
+  table(selected_windows$cycle, selected_windows$replicate),
+  stringsAsFactors = FALSE
+)
+names(selected_cycle_counts) <- c("cycle", "replicate", "participants")
+for (j in seq_len(nrow(selection_validation))) {
+  expected <- selection_validation$minimum_participants[j]
+  actual <- selected_cycle_counts$participants[
+    selected_cycle_counts$cycle == selection_validation$cycle[j]
+  ]
+  stopifnot(length(actual) == 20L, all(actual == expected))
+}
+
+knitr::kable(
+  data.frame(
+    `NHANES cycle` = selection_validation$cycle,
+    `Participants per replication` = selection_validation$minimum_participants,
+    `Number of replications` = selection_validation$replications,
+    `Missing window starts` = selection_validation$total_missing_starts,
+    check.names = FALSE
+  ),
+  caption = "Cycle-specific sample sizes recovered from archived selection validation."
+)
+cat("\nPASS: ", format(nrow(selected_windows), big.mark = ","),
+    " participant-window selections and ",
+    format(nrow(true_exposures), big.mark = ","),
+    " complete reference exposures validated from archived RDS files.", sep = "")
+```
+
+The 3,635 participants are the **final selected reference cohort**, not the number of all NHANES participants and not a survey-weighted national population estimate. The repeated selections use the same cohort and may reuse the same window, so the 20 replications are **not independent participant samples**.
+
+```{r archived-window-variation}
+# This summary requires only the archived list of selected windows.
+distinct_per_person <- tapply(
+  selected_windows$window_start,
+  selected_windows$SEQN,
+  function(x) length(unique(x))
+)
+selection_variation <- data.frame(
+  `Participants checked` = length(distinct_per_person),
+  `Same window selected in all 20` = sum(distinct_per_person == 1L),
+  `More than one distinct window selected` = sum(distinct_per_person > 1L),
+  `Median distinct windows per participant` = median(distinct_per_person),
+  `Maximum distinct windows per participant` = max(distinct_per_person),
+  check.names = FALSE
+)
+knitr::kable(selection_variation,
+             caption = "Within-participant window-selection variation across 20 masking replications.")
+```
+
+The data preparation and cohort-selection steps are now independently checkable **from the archived outputs**. Recomputing the original 20,049-window candidate pool from the raw `.xpt` files would additionally require executing the original data-cleaning and window-detection scripts in a fresh R session; this website does not claim to have performed that more expensive upstream rerun.
+
+# Artificial missing blocks and reconstruction methods
+
+This chapter explains the **artificial missingness design and the four hourly reconstruction algorithms** in the final combined-cycle study. The descriptions and displayed source-code excerpts come from the original numbered scripts, particularly `45.R`, `47.R`, `49.R`, `50.R`, `51.R`, `53.R`, `69.R`, and `70.R`. As in the previous chapter, knitting **does not execute** those original algorithms or retrain random forests.
+
+## What was deliberately removed?
+
+Each replication has one recorded, complete eight-hour activity window for each of the 3,635 participants. In the original code, positions are numbered **0 through 7**. Artificially missing positions start at position 1 (the **second** hour) and extend to position $g$, where $g\in\{1,3,6\}$. Position 0 and position 7 remain observed in every design. These are **nested masks**, so the one-hour positions are a subset of the three-hour positions, which are a subset of the six-hour positions.
+
+The recorded hourly value `PAXMTSH` is saved separately as the known *reference* before the artificial mask is applied. It is not made available as an outcome value to an imputation method at a masked position.
+
+```{r source-mask-definition, echo=FALSE, results='asis'}
+show_source_excerpt("45.R", 77, 109)
+```
+
+```{r masking-design-table}
+# Derive numbers from the archived final reference selections, not manually entered results.
+stopifnot(nrow(selected_windows) == nrow(true_exposures))
+reps <- length(unique(selected_windows$replicate))
+participants_per_rep <- nrow(selected_windows) / reps
+stopifnot(reps == 20L, participants_per_rep == 3635L)
+
+gap_values <- c(1L, 3L, 6L)
+mask_design <- data.frame(
+  `Gap (hours)` = gap_values,
+  `Masked positions (0-based)` = c("1", "1, 2, 3", "1, 2, 3, 4, 5, 6"),
+  `Observed positions (0-based)` = c("0, 2--7", "0, 4--7", "0, 7"),
+  `Masked hours per replication` = participants_per_rep * gap_values,
+  `Masked hours over all 20 selections` = participants_per_rep * reps * gap_values,
+  `Observed hours per participant` = 8L - gap_values,
+  check.names = FALSE
+)
+knitr::kable(mask_design,
+             caption = "The imposed nested-gap designs; counts are calculated from the archived 20-replication selections.")
+```
+
+These are **artificially withheld values from originally complete records**. Their known values allow direct estimation of reconstruction errors. The gap positions are fixed within each selected window, not randomly assigned to different positions. They do not represent a model for why an accelerometer might naturally have missing data.
+
+## How does the code avoid using masked values as donors?
+
+The construction sets `MIMS_observed = NA` at the target positions while retaining the original values in a separate `truth` component. The repeated-analysis driver checks that the expected number of masked references exists and that the masked `MIMS_observed` entries are missing. The kNN and random-forest feature validation checks that artificially masked targets are excluded from donor records and retain valid predictors. These checks are part of the original **simulation-generating code**, not new model fits performed by this page.
+
+```{r source-mask-safety-checks, echo=FALSE, results='asis'}
+show_source_excerpt("70.R", 51, 75)
+show_source_excerpt("70.R", 117, 129)
+```
+
+## The four reconstruction methods
+
+All methods replace **only artificially masked hours**, leaving the unmasked recorded hourly values unchanged. The imputation methods are applied before simulating the regression outcomes; therefore the primary hourly reconstructions do **not** use the simulated health outcome to predict activity.
+
+### Linear interpolation
+
+For each participant, the original function sorts hourly records by the accelerometer sample index and interpolates between available recorded MIMS values with R's `approx(..., method="linear", rule=1)`. Because the selected gaps have observed boundary values, interpolation within these test windows does not require extrapolation.
+
+```{r source-linear-imputation, echo=FALSE, results='asis'}
+show_source_excerpt("47.R", 16, 53)
+```
+
+### Hierarchical time-of-day means
+
+For a masked hour, the time-of-day method follows the hierarchy in `49.R`: first an available **same-participant, same clock-hour** mean, then the **same NHANES cycle and same clock-hour** mean, and finally the **cycle-wide observed** mean. Donors must be clean, unmasked hours with finite recorded MIMS. This is more specific than an unconditional global-mean imputation procedure.
+
+```{r source-time-of-day, echo=FALSE, results='asis'}
+show_source_excerpt("49.R", 29, 43)
+show_source_excerpt("49.R", 50, 103)
+```
+
+### $k$-nearest neighbors ($k=5$)
+
+The final kNN procedure uses 12 predictor features comprising participant characteristics, cyclical time variables, summaries of observed activity, and neighboring observed activity information. In the original function, donors are restricted to clean, observed records, and donor pools are **separate for the two NHANES cycles**. The predictors for both donors and targets are standardized using **donor-only means and standard deviations**. Five nearest donor records are identified using `FNN::get.knnx` (a $k$-d tree search), and their observed MIMS values are averaged.
+
+The exact feature vector and the numerical standardization steps are shown from `50.R` and `51.R`:
+
+```{r source-knn-features, echo=FALSE, results='asis'}
+show_source_excerpt("50.R", 150, 163)
+show_source_excerpt("51.R", 110, 142)
+show_source_excerpt("51.R", 160, 182)
+```
+
+The displayed code is **the original implementation**, rather than a simplified replacement algorithm; rebuilding the predictors and donor matrices requires the preceding source scripts and the cleaned hourly data.
+
+### Random forest regression
+
+Random forests use the **same 12 predictors** as kNN and fit independent regressions within each NHANES cycle. The original implementation uses `ranger` with **200 trees**, **`mtry = 4`**, **minimum node size 5**, and a reproducible seed determined by the replication and gap configuration. Model training uses only clean, available donor hours; the artificially withheld MIMS values are used later for scoring, not as training responses.
+
+```{r source-rf-model, echo=FALSE, results='asis'}
+show_source_excerpt("53.R", 139, 160)
+show_source_excerpt("70.R", 152, 167)
+```
+
+These hyperparameters document **the method that was actually evaluated**. They do not imply that other forest architectures or hyperparameter choices would have the same inferential performance.
+
+## Reconstructing the participant-level exposure
+
+Let $A_{irh}$ denote the recorded reference value at hour $h$ of the selected window for participant $i$ in replicate $r$, and let $\widehat A^{(m,g)}_{irh}$ be its completed value under method $m$ and gap length $g$. The two eight-hour exposures are
+
+$$
+X_{ir}=\frac{1}{8}\sum_{h=1}^{8}A_{irh},\qquad
+\widehat X_{ir}^{(m,g)}=\frac{1}{8}\sum_{h=1}^{8}\widehat A_{irh}^{(m,g)}.
+$$
+
+Because all unmasked hours are preserved, the difference between these exposures is the **sum of prediction errors at the masked hours divided by eight**:
+
+$$
+\widehat X_{ir}^{(m,g)}-X_{ir}
+=\frac{1}{8}\sum_{h\in\mathcal M_g}
+\big(\widehat A_{irh}^{(m,g)}-A_{irh}\big).
+$$
+
+The actual implementation in `69.R` uses this identity and then standardizes reconstructed exposures using the **reference exposure mean and standard deviation**, rather than method-specific standardization:
+
+```{r source-exposure-reconstruction, echo=FALSE, results='asis'}
+show_source_excerpt("69.R", 73, 81)
+show_source_excerpt("69.R", 99, 118)
+```
+
+## Reconstruction evaluation and archived output checks
+
+Hourly prediction error is assessed **on withheld hours only**. Participant-level exposure RMSE and exposure bias are assessed on the eight-hour mean. The quantities are related but answer different questions:
+
+$$
+\operatorname{RMSE}_{\mathrm{hour}}
+=\sqrt{\operatorname{mean}_{\mathrm{masked}}\big[(\widehat A-A)^2\big]},
+\qquad
+\operatorname{RMSE}_{\mathrm{exposure}}
+=\sqrt{\operatorname{mean}_{\mathrm{participants}}\big[(\widehat X-X)^2\big]}.
+$$
+
+The saved reconstruction-summary CSV has one row for each of the **four methods times three gap lengths**. We inspect that archival summary here without fitting any model; detailed reconstruction and regression results appear later in this page.
+
+```{r reconstruction-design-verification}
+mask_summary_path <- file.path(
+  "R results", "Final 2011-2014", "Inference", "Repeated masking",
+  "all20_reconstruction_summary.csv"
+)
+stopifnot(file.exists(mask_summary_path))
+mask_summary <- read.csv(mask_summary_path, check.names = FALSE)
+expected_methods <- c("Linear interpolation", "Time-of-day mean",
+                      "kNN (k = 5)", "Random forest")
+expected_combinations <- expand.grid(
+  gap_hours = gap_values,
+  method = expected_methods,
+  stringsAsFactors = FALSE
+)
+stopifnot(
+  nrow(mask_summary) == 12L,
+  !anyDuplicated(mask_summary[c("gap_hours", "method")]),
+  all(mask_summary$replications == reps),
+  identical(sort(unique(mask_summary$gap_hours)), gap_values),
+  setequal(mask_summary$method, expected_methods),
+  nrow(merge(mask_summary, expected_combinations,
+             by = c("gap_hours", "method"))) == 12L,
+  all(is.finite(mask_summary$mean_hourly_RMSE)),
+  all(is.finite(mask_summary$mean_exposure_RMSE))
+)
+cat("PASS: original archived summary contains 12 distinct method--gap",
+    "configurations, each summarized across 20 selections. No imputation",
+    "or model refitting was performed during knitting.")
+```
+
+For audit purposes, this chapter provides **the original mask and model source code**, the expected masked-value counts, and structural checks of the final saved outputs. These are not equivalent to independently rerunning all 20 iterations from raw NHANES data. That more demanding verification remains a separate reproducibility pathway.
+
+# Regression simulation design, coefficient distortion, and null testing
+
+This chapter separates two related but **distinct** outcome experiments in the original code archive. The primary study repeatedly selects activity windows and generates outcomes with $\beta=0.5$. A separate earlier fixed-mask experiment generates outcomes with $\beta=0$ to assess the false-positive rate. Both are valuable, but their results must not be pooled or described as having the same masking design.
+
+## Main study: outcomes with a known nonzero activity coefficient
+
+For each selected participant window $r$, the original code defines the true standardized eight-hour exposure $X_{ir,z}$. The simulated continuous outcome is
+
+$$
+Y_{irs}=0.5 X_{ir,z}+0.3\,\mathrm{Age}_{i,z}+0.2\,\mathrm{Sex}_i+\varepsilon_{irs},
+\qquad \varepsilon_{irs}\sim N(0,1).
+$$
+
+The code uses the **same outcome realization** to evaluate the oracle regression and all 12 combinations of four reconstruction methods and three gap lengths within a given masking replication. Each regression adjusts for an intercept, age, and sex. This matched design prevents differences between randomly generated outcomes from driving comparisons between methods within an outcome realization.
+
+`71.R` implements the fast Frisch--Waugh--Lovell (FWL) regression calculations, while `72.R` runs the full repeated-outcome experiment from saved imputation checkpoints. In particular, the outcome seed for masking replication $r$ is `20261008 + 1000 * r`. The original code tests the fast calculations against ordinary `lm()` regression in the pilot phase.
+
+```{r original-generating-model, echo=FALSE, results='asis'}
+show_source_excerpt("71.R", 320, 343)
+```
+
+```{r original-outcome-driver, echo=FALSE, results='asis'}
+show_source_excerpt("72.R", 10, 68)
+```
+
+Each selected reference cohort contains 3,635 participants. The full design consists of 20 window-selection replications, each with 200 independently generated outcome realizations. Because each realization is analyzed under the oracle and 12 reconstructed-exposure models, the saved analysis contains $20\times200\times13=52{,}000$ regression records. Each method--gap configuration contributes 4,000 fits; the oracle contributes 4,000. These records **are not 52,000 independent samples of participants**.
+
+```{r simulation-checkpoint-validation}
+checkpoint_dir <- file.path(
+  "R results", "Final 2011-2014", "Inference",
+  "Repeated masking", "Outcome simulations"
+)
+checkpoint_paths <- file.path(
+  checkpoint_dir,
+  sprintf("inference_rep_%02d_200_outcomes.rds", 1:20)
+)
+stopifnot(all(file.exists(checkpoint_paths)))
+
+# Check the saved checkpoints' presence and sizes without fitting any model.
+checkpoint_registry <- data.frame(
+  Replication = 1:20,
+  `Saved file` = basename(checkpoint_paths),
+  `File size (MB)` = round(file.info(checkpoint_paths)$size / 1024^2, 3),
+  check.names = FALSE
+)
+stopifnot(nrow(checkpoint_registry) == 20L)
+cat("PASS: all 20 saved outcome-simulation checkpoints are present. ",
+    "No outcomes or regressions were regenerated.", sep = "")
+```
+
+## What does the regression coefficient estimate after reconstruction?
+
+Let $\mathbf{x}_r$ and $\widehat{\mathbf{x}}_r$ be the true and reconstructed standardized participant-level exposures in one masking replication. Let $Z$ contain the intercept, standardized age, and sex, and let
+
+$$
+M_Z=I-Z(Z^{\mathsf T}Z)^{-1}Z^{\mathsf T}.
+$$
+
+Conditional on the exposure vectors and covariates, the outcome-model error has mean zero. The FWL representation therefore gives
+
+$$
+E\!\left(\widehat\beta\mid\mathbf{x}_r,
+ \widehat{\mathbf{x}}_r,Z\right)
+=\beta\,\lambda_r,
+\qquad
+\lambda_r=
+\frac{\widehat{\mathbf{x}}_r^{\mathsf T}M_Z\mathbf{x}_r}
+     {\widehat{\mathbf{x}}_r^{\mathsf T}M_Z\widehat{\mathbf{x}}_r}.
+$$
+
+In the primary experiment $\beta=0.5$. A $\lambda$ below one reduces the expected positive coefficient; a value above one increases it. These statements describe **coefficient distortion conditional on the specified model**, not a general ranking of interpolation, kNN, or forests. The relevant criterion is not hourly RMSE but a covariate-adjusted covariance-to-variance ratio.
+
+The previously loaded `recon` summary stores the mean $\lambda$ and mean projected coefficient across the 20 masking replications. The next verification compares those projections with the means of the 200 simulated outcomes per masking replication, as saved by script `72.R`.
+
+```{r theory-vs-simulation-validation}
+theory_path <- file.path(
+  checkpoint_dir, "theory_alignment_summary.csv"
+)
+stopifnot(file.exists(theory_path))
+theory_data <- read.csv(theory_path, check.names = FALSE)
+
+expected_specs <- expand.grid(
+  gap_hours = c(1L, 3L, 6L),
+  method = c("Linear interpolation", "Time-of-day mean", "kNN (k = 5)", "Random forest"),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  nrow(theory_data) == 12L,
+  !anyDuplicated(theory_data[c("gap_hours", "method")]),
+  all(theory_data$replications == 20L),
+  nrow(merge(theory_data, expected_specs,
+             by = c("gap_hours", "method"))) == 12L,
+  all(is.finite(theory_data$mean_difference))
+)
+
+theory_merged <- merge(
+  theory_data,
+  read.csv(file.path(
+    "R results", "Final 2011-2014", "Inference",
+    "Repeated masking", "all20_reconstruction_summary.csv"
+  )),
+  by = c("gap_hours", "method"), sort = FALSE
+)
+stopifnot(
+  nrow(theory_merged) == 12L,
+  max(abs(theory_merged$mean_projected_beta.x -
+          theory_merged$mean_projected_beta.y)) < 1e-10
+)
+
+avg_abs_diff <- mean(abs(theory_data$mean_difference))
+max_abs_diff <- max(abs(theory_data$mean_difference))
+max_within_rep_diff <- max(theory_data$maximum_absolute_difference)
+
+verification_table <- data.frame(
+  `Comparison` = c(
+    "Mean absolute difference across 12 method-gap summaries",
+    "Maximum absolute difference across 12 method-gap summaries",
+    "Largest absolute difference at the individual mask level"
+  ),
+  `Absolute difference` = sprintf("%.6f", c(
+    avg_abs_diff, max_abs_diff, max_within_rep_diff
+  )), check.names = FALSE
+)
+knitr::kable(verification_table,
+  caption = "Numerical agreement of theoretical projections and simulated mean coefficients; all values are calculated from original archived CSVs.")
+```
+
+**Interpretation:** The first two rows compare method--gap means **averaged over 20 masks**. The final row is a maximum over individual masking replications, so it is not expected to be as small. This verification does not require rerunning the 4,000 outcomes per configuration.
+
+## Separate experiment: $\beta=0$ and empirical Type I error
+
+Script `62.R` evaluates the **null hypothesis $H_0:\beta=0$** using a single fixed set of reconstructed exposures from the combined 2011--2014 cohort. In that simulation the outcome has no true activity effect:
+
+$$
+Y_{is}=0.3\,\mathrm{Age}_{i,z}
++0.2\,\mathrm{Sex}_i+\varepsilon_{is},
+\qquad \varepsilon_{is}\sim N(0,1).
+$$
+
+The script generates **500 independent outcome realizations** using seed `20261016`. It uses conventional OLS $t$-tests with 3,631 residual degrees of freedom and records the proportion of $p$-values below 0.05:
+
+$$
+\widehat\alpha=\frac{1}{500}
+\sum_{s=1}^{500}\mathbf{1}\{p_s<0.05\}.
+$$
+
+Unlike the main 20-mask experiment, this simulation **does not reselect 20 activity windows**. Its saved results cover the oracle plus **five reconstructed-exposure procedures**: the four main methods and an earlier `MICE PMM (mean of 20)` exposure proxy. Here the MICE label means an **average of 20 imputed exposure draws entered as one regression covariate**; it is **not** the outcome-aware, participant-level MICE analysis pooled using Rubin's rules described later in the paper.
+
+```{r original-null-generating-code, echo=FALSE, results='asis'}
+show_source_excerpt("62.R", 1, 44)
+```
+
+```{r original-null-test-code, echo=FALSE, results='asis'}
+show_source_excerpt("62.R", 82, 110)
+```
+
+```{r null-results-from-original-files}
+null_result_path <- file.path(
+  "R results", "Final 2011-2014", "Inference",
+  "fixed_mask_beta0_type1_summary.csv"
+)
+stopifnot(file.exists(null_result_path))
+null_summary <- read.csv(null_result_path, check.names = FALSE)
+
+expected_null_methods <- c(
+  "Linear interpolation", "Time-of-day mean", "kNN (k = 5)",
+  "Random forest", "MICE PMM (mean of 20)"
+)
+
+stopifnot(
+  nrow(null_summary) == 16L,
+  !anyDuplicated(null_summary[c("gap_hours", "method")]),
+  sum(null_summary$gap_hours == 0L) == 1L,
+  sum(null_summary$gap_hours != 0L) == 15L,
+  all(null_summary$simulations == 500L),
+  setequal(null_summary$method[null_summary$gap_hours != 0L],
+           expected_null_methods),
+  all(null_summary$false_positives >= 0L),
+  all(null_summary$false_positives <= 500L),
+  max(abs(null_summary$false_positives / null_summary$simulations -
+          null_summary$Type_I_error)) < 1e-12
+)
+
+null_order <- c("Oracle (true activity)", expected_null_methods)
+null_summary <- null_summary[order(
+  null_summary$gap_hours,
+  match(null_summary$method, null_order)
+), ]
+
+null_display <- data.frame(
+  `Gap (hours)` = null_summary$gap_hours,
+  `Exposure` = null_summary$method,
+  `Null outcomes` = null_summary$simulations,
+  `False rejections` = null_summary$false_positives,
+  `Type I error` = sprintf("%.1f%%", 100 * null_summary$Type_I_error),
+  check.names = FALSE
+)
+knitr::kable(null_display,
+ caption = "Fixed-mask, beta=0 experiment: empirical Type I error from 500 saved outcome realizations per exposure. This is not the main 20-mask simulation.")
+```
+
+```{r null-error-plot, fig.cap="Fixed-mask empirical Type I error by gap length. Dashed line: nominal 5%. Dotted lines: an approximate 95% Monte Carlo range for 500 independent null outcomes at a true 5% rejection probability."}
+null_methods <- c("Random forest", "kNN (k = 5)",
+                  "Linear interpolation", "Time-of-day mean",
+                  "MICE PMM (mean of 20)")
+null_plot <- null_summary[null_summary$gap_hours %in% c(1, 3, 6), ]
+null_mat <- xtabs(Type_I_error ~ method + gap_hours, data = null_plot)
+null_mat <- null_mat[null_methods, c("1", "3", "6"), drop = FALSE]
+matplot(c(1, 3, 6), t(null_mat), type = "b", pch = 15:19,
+        lty = 1:5, xlab = "Length of missing block (hours)",
+        ylab = "Empirical Type I error", xaxt = "n", ylim = c(0, 0.105))
+axis(1, at = c(1, 3, 6))
+abline(h = .05, lty = 2, lwd = 1.5)
+mc_se <- sqrt(.05 * .95 / 500)
+abline(h = .05 + c(-1, 1) * 1.96 * mc_se, lty = 3)
+legend("topleft", legend = rownames(null_mat),
+       lty = 1:5, pch = 15:19, cex = .73, bty = "n")
+```
+
+Across the saved fixed-mask null results, observed rejection rates range from `r sprintf("%.1f%%", 100 * min(null_summary$Type_I_error))` to `r sprintf("%.1f%%", 100 * max(null_summary$Type_I_error))`. The oracle rejection rate is `r sprintf("%.1f%%", 100 * null_summary$Type_I_error[null_summary$gap_hours == 0])`. Variations of a few percentage points are plausible with 500 independent null outcomes; these summaries do **not** establish equal performance under nonzero effects or other missingness configurations.
+
+### Why approximately correct null tests can coexist with biased nonzero-effect estimates
+
+The coefficient projection explains this apparent paradox. Under the stated outcome model,
+
+$$
+E(\widehat\beta\mid\mathbf{x},\widehat{\mathbf{x}},Z)
+=\beta\lambda.
+$$
+
+When $\beta=0$, the conditional expected coefficient equals zero regardless of $\lambda$, provided the reconstructed exposure is fixed independently of the simulated outcome errors. Under the independent Gaussian-error model and standard OLS assumptions, nominal null tests can remain correctly calibrated **even if** a reconstruction procedure gives $\lambda$ far from one. Under $\beta=0.5$, by contrast, the same $\lambda$ produces systematic coefficient distortion and can contribute to poor interval coverage.
+
+The fixed-mask null experiment therefore checks a **different inferential property** from coefficient bias and 95% coverage under the main nonzero-effect simulation. It does not replace the need to assess both.
+
+---
+
+# Participant-level outcome-aware multiple-imputation sensitivity analysis
+
+This chapter documents a **separate** missing-exposure experiment from the original research archive. The principal analysis above deliberately removes **hourly** MIMS measurements from each eight-hour window and reconstructs them using four single-imputation methods. Here, the missing target is the **participant-level standardized eight-hour mean exposure itself**. The imputation also includes the simulated outcome as an auxiliary predictor and represents uncertainty through multiple completed datasets and Rubin's pooling rules. These differences preclude treating the two experiments as a head-to-head comparison of methods under an identical design.
+
+All results below come directly from the original archived CSV and RDS files generated primarily by `77.R`, `78.R`, `79.R`, and `80.R`. The website **does not rerun MICE or simulate any new outcomes**.
+
+## Missingness mechanism, cohort and variables
+
+The sensitivity experiment is restricted to the **2011--2012 NHANES cycle** with 1,787 eligible participants. Within one artificial missingness assignment, **1,251 (approximately 70%)** participant-level standardized activity exposures are withheld completely at random, leaving **536 (approximately 30%)** observed exposures. The missingness indicator was assigned independently of the reference exposure, covariates, and simulated outcomes. The original recorded first and last hours of the reference window remain available as auxiliary information; **this does not mean that six individual hourly observations were imputed in this experiment**.
+
+For each outcome realization, the original code imputes `X_observed_z` using predictive mean matching (PMM) conditional on the following seven predictors: the simulated outcome `Y`, standardized age `age_z`, sex `sex_binary`, the first and last observed hourly activity measurements (`boundary_start`, `boundary_end`), and cyclical start-time terms (`start_sin`, `start_cos`). Because `Y` changes between outcome realizations, the MICE procedure is performed separately for each one. The outcome-generating coefficient remains $\beta=0.5$.
+
+```{r mice-original-specification, echo=FALSE, results='asis'}
+show_source_excerpt("77.R", 27, 81)
+```
+
+## Twenty imputations and Rubin's pooling
+
+For the sensitivity analysis, the original implementation uses **20 imputed datasets**, five predictive-mean-matching donors, and one iteration of the chained-equations routine per call (`maxit = 1`). That last setting is important to report: the saved results assess this particular implementation, **not** an arbitrarily converged MICE procedure. Only the participant-level exposure is imputed; the outcome and auxiliary predictors are observed.
+
+```{r mice-original-fit, echo=FALSE, results='asis'}
+show_source_excerpt("77.R", 108, 132)
+```
+
+For imputed dataset $j=1,\dots,M$, let $Q_j$ be the fitted activity coefficient and $U_j$ its estimated variance. The combined estimate and total variance follow Rubin's rules:
+
+$$
+\bar Q=\frac{1}{M}\sum_{j=1}^{M}Q_j,\qquad
+\bar U=\frac{1}{M}\sum_{j=1}^{M}U_j,\qquad
+B=\frac{1}{M-1}\sum_{j=1}^{M}(Q_j-\bar Q)^2,
+$$
+
+$$
+T=\bar U+\left(1+\frac{1}{M}\right)B,
+\qquad \mathrm{SE}_{\rm pooled}=\sqrt{T},\qquad M=20.
+$$
+
+Each completed dataset is analyzed using the same age- and sex-adjusted OLS regression as in the primary simulation. The original R code implements pooling with `mice::pool.scalar()` and uses the returned degrees of freedom to construct the confidence interval.
+
+```{r mice-original-pooling, echo=FALSE, results='asis'}
+show_source_excerpt("77.R", 546, 568)
+```
+
+## Recover the 200-outcome sensitivity comparison
+
+The initial missingness assignment was evaluated over **200 independent simulated outcomes**, with the same outcomes analyzed under three procedures: the oracle using the true participant-level exposure, complete-case analysis using 536 observed exposures, and participant-level MICE using all 1,787 participants through imputation. Comparisons are therefore matched at the outcome-realization level.
+
+```{r mice-load-original-summaries}
+mice_dir <- file.path(
+  "R results", "Final 2011-2014", "Inference",
+  "Repeated masking", "Outcome simulations", "Outcome aware MICE"
+)
+
+mice_files <- c(
+  summary_200 = file.path(mice_dir, "participant_mice_200outcome_summary.csv"),
+  saved_table_200 = file.path(mice_dir, "Table_MICE_200_Outcomes.csv"),
+  assignment_summary = file.path(mice_dir, "Table_MICE_Four_Assignments.csv"),
+  paired_summary = file.path(mice_dir, "Table_MICE_Paired_Comparisons.csv"),
+  first_50 = file.path(mice_dir, "participant_mice_50outcome_summary.csv")
+)
+if (!all(file.exists(mice_files))) {
+  stop("Missing original MICE result(s): ",
+       paste(mice_files[!file.exists(mice_files)], collapse = ", "))
+}
+
+mice_200 <- read.csv(mice_files[["summary_200"]], check.names = FALSE)
+mice_table_200 <- read.csv(mice_files[["saved_table_200"]], check.names = FALSE)
+mice_assignments <- read.csv(mice_files[["assignment_summary"]], check.names = FALSE)
+mice_paired <- read.csv(mice_files[["paired_summary"]], check.names = FALSE)
+mice_first50 <- read.csv(mice_files[["first_50"]], check.names = FALSE)
+
+comparison_labels <- c("Oracle", "Complete-case", "Participant-level MICE")
+stopifnot(
+  nrow(mice_200) == 3L,
+  setequal(mice_200$method, comparison_labels),
+  all(mice_200$outcomes == 200L),
+  isTRUE(all.equal(mice_200, mice_table_200, tolerance = 1e-12)),
+  all(is.finite(mice_200$mean_beta)),
+  all(is.finite(mice_200$RMSE_beta)),
+  all(mice_200$coverage >= 0 & mice_200$coverage <= 1),
+  all(abs(mice_200$mean_beta - 0.5 - mice_200$bias) < 1e-10),
+  all(abs(mice_200$empirical_SD / mice_200$mean_model_SE -
+          mice_200$SE_ratio) < 1e-10)
+)
+
+mice_200 <- mice_200[match(comparison_labels, mice_200$method), ]
+mice_display <- data.frame(
+  Method = mice_200$method,
+  `Mean coefficient` = sprintf("%.4f", mice_200$mean_beta),
+  `Coefficient bias` = sprintf("%+.4f", mice_200$bias),
+  `Empirical SD` = sprintf("%.4f", mice_200$empirical_SD),
+  `Mean model SE` = sprintf("%.4f", mice_200$mean_model_SE),
+  `Coefficient RMSE` = sprintf("%.4f", mice_200$RMSE_beta),
+  `95% CI coverage` = sprintf("%.1f%%", 100 * mice_200$coverage),
+  check.names = FALSE
+)
+knitr::kable(mice_display,
+  caption = "Participant-level MCAR sensitivity analysis: 200 matched outcomes under the oracle, complete-case, and outcome-aware MICE procedures.")
+```
+
+In these **200 saved outcomes**, MICE reduces coefficient RMSE relative to complete-case analysis, while the oracle retains the true activity exposure. The estimated coverage of MICE is not higher than complete-case coverage in the same experiment. The number of outcomes also limits the precision with which coverage can be estimated: the archived table includes Monte Carlo standard errors, which should be considered before interpreting small differences in coverage.
+
+```{r mice-200-rmse-figure, fig.cap="Coefficient RMSE in the 200-outcome participant-level MCAR sensitivity analysis. Lower is better for this particular design."}
+barplot(
+  height = mice_200$RMSE_beta,
+  names.arg = c("Oracle", "Complete case", "MICE"),
+  ylab = "Coefficient RMSE",
+  main = "Participant-level missingness sensitivity",
+  las = 1
+)
+```
+
+## Four missingness assignments with matched outcome realizations
+
+The research archive contains four different random selections of the 1,251 participants whose exposure is artificially missing. The comparison uses the **same first 50 simulated outcomes for each assignment**, not four independent samples of 1,787 participants. For assignments 2--4 the original code sets the missingness-assignment seeds to `20261700 + assignment_number`; the repeated outcome comparison was then saved in `Table_MICE_Four_Assignments.csv` and `Table_MICE_Paired_Comparisons.csv`.
+
+The original assignment construction and result summarization are documented in the following excerpts.
+
+```{r mice-original-assignment-code, echo=FALSE, results='asis'}
+show_source_excerpt("78.R", 475, 533)
+```
+
+```{r mice-original-assignment-summary, echo=FALSE, results='asis'}
+show_source_excerpt("80.R", 137, 163)
+```
+
+```{r mice-validate-assignment-results}
+stopifnot(
+  nrow(mice_assignments) == 12L,
+  !anyDuplicated(mice_assignments[c("assignment", "method")]),
+  setequal(mice_assignments$assignment, 1:4),
+  setequal(mice_assignments$method, comparison_labels),
+  all(mice_assignments$outcomes == 50L),
+  all(is.finite(mice_assignments$mean_beta)),
+  all(mice_assignments$coverage >= 0 & mice_assignments$coverage <= 1),
+  nrow(mice_paired) == 4L,
+  setequal(mice_paired$assignment, 1:4),
+  all(mice_paired$outcomes == 50L),
+  all(mice_paired$mice_closer_percent >= 0 &
+      mice_paired$mice_closer_percent <= 100),
+  all(mice_paired$mean_absolute_error_mice <
+      mice_paired$mean_absolute_error_cc)
+)
+
+first_match <- merge(mice_first50,
+  mice_assignments[mice_assignments$assignment == 1L, ],
+  by = "method", suffixes = c(".first50", ".assignment"))
+stopifnot(
+  nrow(first_match) == 3L,
+  all(abs(first_match$mean_beta.first50 -
+          first_match$mean_beta.assignment) < 1e-10),
+  all(abs(first_match$coverage.first50 -
+          first_match$coverage.assignment) < 1e-10)
+)
+
+assignment_view <- mice_assignments[mice_assignments$method == "Participant-level MICE", ]
+assignment_view <- assignment_view[order(assignment_view$assignment), ]
+knitr::kable(data.frame(
+  Assignment = assignment_view$assignment,
+  `Mean coefficient` = sprintf("%.4f", assignment_view$mean_beta),
+  `Bias` = sprintf("%+.4f", assignment_view$bias),
+  `Mean model SE` = sprintf("%.4f", assignment_view$mean_model_SE),
+  `SE ratio` = sprintf("%.3f", assignment_view$SE_ratio),
+  `95% CI coverage` = sprintf("%.0f%%", 100 * assignment_view$coverage),
+  check.names = FALSE
+), caption = "Outcome-aware participant-level MICE across four MCAR missingness assignments, each evaluated on the same 50 simulated outcomes.")
+```
+
+In the paired comparison, the metric **MICE closer (%)** is the percentage of the 50 matched outcome realizations in which the MICE activity coefficient has smaller absolute error than the complete-case coefficient. This does not constitute a formal test of superiority across independent population samples.
+
+```{r mice-paired-comparisons}
+mice_paired <- mice_paired[order(mice_paired$assignment), ]
+knitr::kable(data.frame(
+  Assignment = mice_paired$assignment,
+  `CC mean absolute error` = sprintf("%.4f", mice_paired$mean_absolute_error_cc),
+  `MICE mean absolute error` = sprintf("%.4f", mice_paired$mean_absolute_error_mice),
+  `MICE closer` = sprintf("%.0f%%", mice_paired$mice_closer_percent),
+  `CC coverage` = sprintf("%.0f%%", 100 * mice_paired$coverage_cc),
+  `MICE coverage` = sprintf("%.0f%%", 100 * mice_paired$coverage_mice),
+  check.names = FALSE
+), caption = "Paired complete-case and MICE comparisons using the original archived matched outcomes.")
+```
+
+```{r mice-coverage-by-assignment, fig.cap="Empirical 95% confidence interval coverage across the four matched-outcome missingness assignments. Each bar reflects 50 outcomes, and coverage estimates have Monte Carlo uncertainty."}
+cover_mat <- rbind(
+  `Complete case` = mice_paired$coverage_cc * 100,
+  `Participant MICE` = mice_paired$coverage_mice * 100
+)
+barplot(cover_mat, beside = TRUE,
+        names.arg = paste("Assignment", mice_paired$assignment),
+        ylab = "Empirical 95% CI coverage (%)", ylim = c(0, 105))
+abline(h = 95, lty = 2)
+legend("bottomleft", legend = rownames(cover_mat), fill = gray.colors(2), bty = "n")
+```
+
+## Check archived MICE checkpoints and results provenance
+
+All 200 individual outcome checkpoints from the first assignment, the 150 outcome checkpoints from assignments 2--4, and the final CSV summary files remain in the original research archive. We verify their presence and uniqueness without rerunning `mice()`.
+
+```{r mice-checkpoint-validation}
+first_assignment_checkpoints <- file.path(
+  mice_dir, sprintf("participant_mi_outcome_%02d.rds", 1:200)
+)
+# Original script uses %02d: indices 100--200 appear as three digits.
+other_assignment_checkpoints <- unlist(lapply(2:4, function(a) {
+  file.path(mice_dir, sprintf(
+    "participant_assignment_%02d_outcome_%03d.rds", a, 1:50))
+}), use.names = FALSE)
+stopifnot(
+  length(first_assignment_checkpoints) == 200L,
+  length(other_assignment_checkpoints) == 150L,
+  all(file.exists(first_assignment_checkpoints)),
+  all(file.exists(other_assignment_checkpoints)),
+  !anyDuplicated(c(first_assignment_checkpoints, other_assignment_checkpoints))
+)
+cat("PASS: 200 first-assignment and 150 additional-assignment outcome ",
+    "checkpoints located; summary tables verified without new MICE fits.", sep = "")
+
+mice_input_audit <- data.frame(
+  `Archived input` = names(mice_files),
+  `Relative path` = unname(mice_files),
+  `MD5` = unname(tools::md5sum(mice_files)),
+  check.names = FALSE
+)
+knitr::kable(mice_input_audit, caption = "Original saved MICE CSV inputs and file checksums.")
+```
+
+The saved outputs provide a reproducible **results-regeneration pathway** for this experiment. Fully replicating MICE from the source participant-level data additionally requires executing the original data preparation and repeated-imputation code in an appropriate R environment. The favorable MICE results are conditional on the participant-level MCAR design, the inclusion of the simulated outcome in the imputation model, and the algorithm settings above.
+
+# Observed BMI application: survey-weighted regression and exposure reconstruction
+
+The earlier analyses evaluated known regression parameters using **simulated outcomes**. This section presents a separate **observed-outcome illustration**: the association between reconstructed wrist-worn activity and recorded body mass index (BMI, `BMXBMI`). It uses the original **NHANES 2013--2014 (`H`) cycle**, not the combined-cycle cohort used in the primary simulation. The archived files were generated by the earlier BMI workflow in scripts `33.R`--`38.R`. The website loads the original saved results without fitting survey models, repeating imputation, or modifying any files.
+
+**Important interpretation:** In this observational analysis the activity coefficient is **not known**. The coefficient from the original complete eight-hour activity window is used as a **within-mask reference estimate**, not as a true causal effect or an error-free population parameter. Consequently, the differences below measure *changes in the fitted association when exposures are reconstructed*, not simulation bias against a known parameter. Survey weights were applied within this selected cohort; selection into a complete-window cohort is not corrected by simply adding those weights, and the analysis should not be called nationally representative.
+
+## Analytic cohort and regression specification
+
+The BMI analysis begins from an earlier pool of 2,117 participants with eligible complete eight-hour windows in the 2013--2014 data. The final cohort contains **961 adults**, defined in the original `34.R` by age at least 20 years, observed BMI, positive Medical Examination Center (MEC) weight (`WTMEC2YR`), observed survey PSU and stratum indicators, and exclusion of women recorded as pregnant. The same 961 adults contribute to the 20 repeated activity-window selections. These are **not 20 independent samples of people**.
+
+```{r bmi-original-cohort-excerpt, echo=FALSE, results='asis'}
+show_source_excerpt("34.R", 1, 41)
+```
+
+The reference and reconstructed-exposure analyses use `survey::svydesign(ids = ~SDMVPSU, strata = ~SDMVSTRA, weights = ~WTMEC2YR, nest = TRUE)` and fit a survey-weighted model of the form
+
+$$
+\operatorname{BMI}_i = \alpha + \theta X_{i,z} + \gamma\,\operatorname{Age}_{i,z}
++ \delta\,\operatorname{Sex}_i + \boldsymbol{\eta}^{\mathsf T}\operatorname{RaceEthnicity}_i + e_i.
+$$
+
+Here $X_{i,z}$ is the selected window's **standardized eight-hour mean MIMS activity**, with all reconstructed exposures placed on the corresponding reference-exposure scale for that window selection. The design-based coefficients and standard errors are obtained using `survey::svyglm()`. There is no synthetic $\beta=0.5$ target in this section.
+
+```{r bmi-original-survey-function, echo=FALSE, results='asis'}
+show_source_excerpt("36.R", 63, 105)
+```
+
+## Original 20-mask BMI experiment and imputation methods
+
+For each of 20 activity-window selections (`20261200 + r`, where $r$ is the selection number), the original code compares regression using the complete reference exposure with regression after hourly reconstruction using linear interpolation, hierarchical time-of-day means, $k$NN ($k=5$), and random forest. In **this earlier BMI application** the forest is fitted with **100 trees**, not the 200 trees used in the later combined-cycle primary study. The observed health outcome does not enter the four single-reconstruction methods.
+
+```{r bmi-original-exposure-build, echo=FALSE, results='asis'}
+show_source_excerpt("35.R", 39, 120)
+```
+
+```{r bmi-original-single-method-analysis, echo=FALSE, results='asis'}
+show_source_excerpt("36.R", 304, 380)
+```
+
+The archive also contains a **fifth method, outcome-aware MICE-PMM with BMI**. Unlike the preceding participant-level MICE sensitivity analysis, this procedure imputes the **artificially missing hourly MIMS values**, includes observed BMI and race/ethnicity among its predictors, uses 20 imputations with five PMM donors, and combines survey-weighted regression coefficients using Rubin's rules. The original implementation used `maxit = 1` and a complete-data residual degrees-of-freedom value of 7 for pooling. Those settings are documented here rather than silently treated as general recommendations. This is a separate analysis and should not be pooled with the earlier participant-level MCAR experiment.
+
+```{r bmi-original-pmm-model, echo=FALSE, results='asis'}
+show_source_excerpt("37.R", 378, 434)
+```
+
+```{r bmi-original-survey-pooling, echo=FALSE, results='asis'}
+show_source_excerpt("37.R", 656, 683)
+```
+
+## Load the archived BMI results and verify the 20 selections
+
+The four single-imputation methods produce 20 reference rows and $20\times4\times3 = 240$ method--gap rows. Outcome-aware MICE produces a further $20\times3=60$ rows. We check the saved results at the *individual window-selection level*, rather than merely displaying manually copied averages.
+
+```{r bmi-load-and-verify}
+bmi_dir <- file.path("R results", "Real BMI application")
+bmi_files <- c(
+  four_details = file.path(bmi_dir, "real_bmi_results_all_four_methods.csv"),
+  four_summary = file.path(bmi_dir, "real_bmi_distortion_summary_four_methods.csv"),
+  mice_details = file.path(bmi_dir, "real_bmi_mice_results_all.csv"),
+  mice_summary = file.path(bmi_dir, "real_bmi_mice_distortion_summary.csv"),
+  combined_summary = file.path(bmi_dir, "final_five_method_real_bmi_summary.csv")
+)
+if (!all(file.exists(bmi_files))) {
+  stop("Missing original real BMI file(s): ",
+       paste(bmi_files[!file.exists(bmi_files)], collapse = ", "))
+}
+bmi_four <- read.csv(bmi_files[["four_details"]], check.names = FALSE)
+bmi_four_summary <- read.csv(bmi_files[["four_summary"]], check.names = FALSE)
+bmi_mice <- read.csv(bmi_files[["mice_details"]], check.names = FALSE)
+bmi_mice_summary <- read.csv(bmi_files[["mice_summary"]], check.names = FALSE)
+bmi_combined <- read.csv(bmi_files[["combined_summary"]], check.names = FALSE)
+
+bmi_methods <- c("Linear interpolation", "Time-of-day mean",
+                 "kNN (k = 5)", "Random forest", "MICE-PMM + BMI")
+bmi_gaps <- c("1 hour", "3 hours", "6 hours")
+stopifnot(
+  nrow(bmi_four) == 260L,
+  nrow(bmi_mice) == 60L,
+  nrow(bmi_four_summary) == 12L,
+  nrow(bmi_mice_summary) == 3L,
+  nrow(bmi_combined) == 15L,
+  all(bmi_four$n == 961L),
+  all(bmi_mice$n == 961L),
+  setequal(bmi_four$mask_replicate, 1:20),
+  setequal(bmi_mice$mask_replicate, 1:20),
+  sum(bmi_four$method == "Reference: true activity") == 20L,
+  all(table(bmi_four$mask_replicate) == 13L),
+  all(table(bmi_mice$mask_replicate) == 3L),
+  all(bmi_mice$imputations == 20L),
+  !anyDuplicated(bmi_combined[c("gap", "method")]),
+  setequal(bmi_combined$method, bmi_methods),
+  setequal(bmi_combined$gap, bmi_gaps),
+  all(bmi_combined$masks == 20L),
+  all(is.finite(bmi_combined$mean_beta_difference)),
+  all(is.finite(bmi_combined$mean_absolute_difference))
+)
+# Match the reference fitted coefficient within each window selection.
+bmi_reference <- bmi_four[
+  bmi_four$method == "Reference: true activity",
+  c("mask_replicate", "beta_hat")
+]
+stopifnot(!anyDuplicated(bmi_reference$mask_replicate))
+for (dat in list(bmi_four, bmi_mice)) {
+  reference_for_row <- bmi_reference$beta_hat[
+    match(dat$mask_replicate, bmi_reference$mask_replicate)
+  ]
+  stopifnot(
+    !anyNA(reference_for_row),
+    max(abs(dat$reference_beta - reference_for_row)) < 1e-10,
+    max(abs(dat$beta_difference - (dat$beta_hat - reference_for_row))) < 1e-10,
+    max(abs(dat$absolute_beta_difference - abs(dat$beta_difference))) < 1e-10
+  )
+}
+# Ensure the five-method summary agrees with all the individual-mask estimates.
+bmi_all_methods <- rbind(
+  bmi_four[bmi_four$method != "Reference: true activity",
+           c("method", "gap", "beta_difference", "absolute_beta_difference")],
+  bmi_mice[, c("method", "gap", "beta_difference", "absolute_beta_difference")]
+)
+bmi_recalculated <- aggregate(
+  cbind(beta_difference, absolute_beta_difference) ~ method + gap,
+  data = bmi_all_methods, FUN = mean
+)
+bmi_recheck <- merge(bmi_combined, bmi_recalculated,
+                     by = c("method", "gap"), suffixes = c(".saved", ".computed"))
+stopifnot(
+  nrow(bmi_recheck) == 15L,
+  max(abs(bmi_recheck$mean_beta_difference - bmi_recheck$beta_difference)) < 1e-10,
+  max(abs(bmi_recheck$mean_absolute_difference - bmi_recheck$absolute_beta_difference)) < 1e-10
+)
+cat("PASS: 260 saved reference/single-reconstruction records, 60 saved BMI-MICE records, and all 15 five-method summary rows validated. No regressions or imputations rerun.")
+```
+
+## Changes in the observed BMI--activity association
+
+For each selection $r$, define the *reference* survey-weighted coefficient $\widehat\theta_{r,\mathrm{ref}}$ and the fitted coefficient using method $m$ and gap length $g$, $\widehat\theta_{r,m,g}$. The reported coefficient difference is
+
+$$
+\Delta_{r,m,g}=\widehat\theta_{r,m,g}-\widehat\theta_{r,\mathrm{ref}}.
+$$
+
+The mean difference and mean absolute difference summarize, across the 20 repeated selections, how each reconstruction procedure changes the *observed* BMI association. They are **not** estimates of statistical bias relative to an unknown true health-effect parameter.
+
+```{r bmi-saved-summary-table}
+bmi_combined <- bmi_combined[
+  order(match(bmi_combined$gap, bmi_gaps),
+        match(bmi_combined$method, bmi_methods)), ]
+knitr::kable(data.frame(
+  `Missing block` = bmi_combined$gap,
+  Method = bmi_combined$method,
+  `Mean reference coefficient` = sprintf("%+.4f", bmi_combined$mean_reference_beta),
+  `Mean reconstructed coefficient` = sprintf("%+.4f", bmi_combined$mean_imputed_beta),
+  `Mean coefficient shift` = sprintf("%+.4f", bmi_combined$mean_beta_difference),
+  `Mean absolute shift` = sprintf("%.4f", bmi_combined$mean_absolute_difference),
+  `Mean model SE` = sprintf("%.4f", bmi_combined$mean_SE),
+  check.names = FALSE
+), caption = "Observed BMI application: activity-coefficient changes relative to each mask's complete-window reference regression (961 adults, 20 window selections per method-gap combination).")
+```
+
+```{r bmi-shift-figure, fig.cap="Mean absolute difference between reconstructed-exposure and reference survey-weighted BMI regression coefficients, by gap length (20 selections per setting)."}
+shift_matrix <- xtabs(mean_absolute_difference ~ method + gap,
+                      data = bmi_combined)
+shift_matrix <- shift_matrix[bmi_methods, bmi_gaps, drop = FALSE]
+matplot(1:3, t(shift_matrix), type = "b", pch = 15:19,
+        lty = 1:5, col = 1:5, xaxt = "n",
+        xlab = "Length of missing block", ylab = "Mean absolute coefficient shift")
+axis(1, at = 1:3, labels = bmi_gaps)
+legend("topleft", legend = rownames(shift_matrix), pch = 15:19,
+       col = 1:5, lty = 1:5, cex = .76, bty = "n")
+```
+
+In the archived BMI analysis, the mean complete-window reference coefficient was approximately `r sprintf("%.3f", mean(bmi_reference$beta_hat))` across repeated selections. This describes a **negative conditional association**, not a causal effect. For six-hour gaps, mean activity-coefficient shifts relative to the corresponding reference estimates were approximately `r sprintf("%+.3f", bmi_combined$mean_beta_difference[bmi_combined$method=="Random forest" & bmi_combined$gap=="6 hours"])` for random forest and `r sprintf("%+.3f", bmi_combined$mean_beta_difference[bmi_combined$method=="MICE-PMM + BMI" & bmi_combined$gap=="6 hours"])` for BMI-aware MICE. This observational comparison illustrates that the fitted coefficient can change substantially when activity measurements are reconstructed. **It does not establish which method identifies a true causal association.**
+
+## What the BMI analysis can and cannot establish
+
+This BMI application is informative because the outcome is **observed**, but it has its own methodological limitations. It uses the earlier single-cycle cohort of 961 adults, not the final 3,635-person combined-cycle cohort; its random forest uses 100 trees rather than 200; and the fifth method performs **BMI-aware imputation of hourly activity measurements**, not the separately evaluated participant-level MCAR exposure imputation. In addition, repeated windows for the same adults are not independent population replications. A proportion of regression $p$-values below 0.05 across those windows would be a *selection-sensitivity descriptive measure*, **not** a simulated Type I error rate or coverage probability. The survey-weighted analysis on this selected sample is not automatically nationally representative.
+
+The website therefore reports coefficient changes relative to complete-window reference fits, without treating these changes as differences from a known causal parameter or as a randomized comparison among imputation methods.
+
+## BMI result-file provenance and source scripts
+
+```{r bmi-original-file-audit}
+bmi_audit <- data.frame(
+  Source = names(bmi_files),
+  `Original relative path` = unname(bmi_files),
+  `MD5 checksum` = unname(tools::md5sum(bmi_files)),
+  check.names = FALSE
+)
+knitr::kable(bmi_audit,
+  caption = "Checksums and unchanged original CSV file paths for the observed BMI application.")
+```
+
+```{r bmi-checkpoint-audit}
+bmi_checkpoint_paths <- file.path(bmi_dir,
+  sprintf("real_bmi_mask_%02d.rds", 1:20))
+bmi_mice_checkpoint_paths <- file.path(bmi_dir,
+  sprintf("real_bmi_mice_mask_%02d.rds", 1:20))
+stopifnot(
+  all(file.exists(bmi_checkpoint_paths)),
+  all(file.exists(bmi_mice_checkpoint_paths))
+)
+cat("PASS: all 20 saved original-method BMI checkpoints and 20 BMI-MICE checkpoints are present.")
+```
+
+The documented lineage is `33.R` (single-cycle BMI inputs), `34.R` (corrected adult eligibility), `35.R` (complete and reconstructed eight-hour exposures), `36.R` (survey-weighted regression and 20 masked windows), `37.R` (outcome-aware hourly PMM and survey pooling), and `38.R` (20-mask MICE analysis and combined summary). The original scripts may rely on objects created in earlier R sessions; this chapter verifies **archived outputs** and does not claim a clean-session rerun of the entire BMI workflow.
+
+# Read the original saved results
+
+The inputs below are **not copied files**. They are the actual output tables stored in the original research archive. Scripts `70.R` and `72.R` created the primary summaries, and script `81.R` created the saved manuscript tables. See the script inventory later on this page.
+
+```{r original-project-check}
+# Subsequent chunks run in PROJECT_ROOT automatically (set in setup).
+script_paths <- file.path("R results", "R scripts", paste0(1:81, ".R"))
+script_paths[33] <- "33.R"
+missing <- script_paths[!file.exists(script_paths)]
+if (length(missing)) {
+  stop("Located project at ", PROJECT_ROOT,
+       " but cannot find ", length(missing), " original script(s). ",
+       "First missing file: ", missing[1],
+       ". Please fully extract the original research ZIP.")
+}
+cat("PASS: all 81 original numbered R scripts were found. No numbered script is executed during knitting.")
+```
+
+```{r load-saved-results}
+# Preserve the actual original relative paths, including spaces.
+primary <- file.path("R results", "Final 2011-2014", "Inference",
+                     "Repeated masking")
+outcomes <- file.path(primary, "Outcome simulations")
+
+required_files <- c(
+  reconstruction = file.path(primary, "all20_reconstruction_summary.csv"),
+  inference = file.path(outcomes, "full_inference_summary.csv"),
+  table1 = file.path(outcomes, "Manuscript tables", "Table_1_Reconstruction.csv"),
+  table2 = file.path(outcomes, "Manuscript tables", "Table_2_Inference.csv"),
+  theory = file.path(outcomes, "theory_alignment_summary.csv")
+)
+
+if (!all(file.exists(required_files))) {
+  stop("Missing archived result file(s):\n",
+       paste(required_files[!file.exists(required_files)], collapse = "\n"))
+}
+
+recon <- read.csv(required_files[["reconstruction"]], check.names = FALSE)
+inference <- read.csv(required_files[["inference"]], check.names = FALSE)
+saved_table1 <- read.csv(required_files[["table1"]], check.names = FALSE)
+saved_table2 <- read.csv(required_files[["table2"]], check.names = FALSE)
+theory_check <- read.csv(required_files[["theory"]], check.names = FALSE)
+
+stopifnot(
+  nrow(recon) == 12L,
+  nrow(inference) == 13L,
+  all(recon$replications == 20L),
+  all(inference$total_simulations == 4000L),
+  all(sort(unique(recon$gap_hours)) == c(1, 3, 6))
+)
+
+cat("Loaded", nrow(recon), "reconstruction configurations and",
+    nrow(inference), "regression summaries (including the oracle).")
+```
+
+## Result-file provenance
+
+The relative paths and file checksums below make it possible to identify exactly which archived files were used to render the tables. Checksums are calculated locally on the input files, not entered manually.
+
+```{r show-input-provenance}
+input_provenance <- data.frame(
+  Input = names(required_files),
+  `Original relative path` = unname(required_files),
+  `MD5 of original CSV` = unname(tools::md5sum(required_files)),
+  check.names = FALSE
+)
+knitr::kable(input_provenance, caption = "Source CSVs within the original research folder.")
+```
+
+# Reconstruction accuracy
+
+Reconstruction accuracy is assessed at two resolutions: the missing hourly measurements, and the participant-level mean over the full eight-hour window. These objectives are related but not identical, because hourly errors may accumulate or offset each other when values are averaged.
+
+```{r table-reconstruction}
+method_order <- c(
+  "Random forest", "kNN (k = 5)",
+  "Linear interpolation", "Time-of-day mean"
+)
+recon <- recon[order(recon$gap_hours, match(recon$method, method_order)), ]
+
+recon_display <- data.frame(
+  `Gap (hours)` = recon$gap_hours,
+  `Method` = recon$method,
+  `Hourly RMSE` = sprintf("%.2f", recon$mean_hourly_RMSE),
+  `Exposure RMSE` = sprintf("%.2f", recon$mean_exposure_RMSE),
+  `Exposure bias` = sprintf("%.2f", recon$mean_exposure_Bias),
+  check.names = FALSE
+)
+knitr::kable(
+  recon_display, align = c("r", "l", "r", "r", "r"),
+  caption = "Reconstruction performance averaged across 20 masking replications."
+)
+```
+
+```{r rmse-chart, fig.cap="Mean hourly reconstruction RMSE by missing-block length, using archived simulation summaries."}
+rmse_matrix <- xtabs(mean_hourly_RMSE ~ method + gap_hours, data = recon)
+rmse_matrix <- rmse_matrix[method_order, c("1", "3", "6"), drop = FALSE]
+matplot(c(1, 3, 6), t(rmse_matrix), type = "b", pch = 15:18,
+        lty = 1:4, col = 1:4, xlab = "Length of missing block (hours)",
+        ylab = "Mean hourly RMSE", xaxt = "n")
+axis(1, at = c(1, 3, 6))
+legend("topleft", legend = rownames(rmse_matrix),
+       col = 1:4, lty = 1:4, pch = 15:18, cex = 0.8, bty = "n")
+```
+
+In these archived results, random forest had the lowest hourly RMSE at each gap length. For six-hour blocks, random forest's hourly RMSE was approximately 447, whereas the corresponding value for $k$NN was approximately 463. The distinction between reconstruction quality and downstream inference becomes important below.
+
+# Regression inference
+
+The regression outcomes were simulated using the original reference exposure, age, and sex. Ordinary least squares models were then fitted with the **reconstructed** exposure instead of the true one. The usual confidence intervals treated the reconstructed exposure as observed, without explicitly propagating the uncertainty of single reconstruction.
+
+```{r table-regression}
+inference <- inference[
+  order(inference$gap_hours,
+        match(inference$method, c("Oracle", method_order))),
+]
+
+regression_display <- data.frame(
+  `Gap (hours)` = inference$gap_hours,
+  `Method` = inference$method,
+  `Mean beta` = sprintf("%.4f", inference$mean_beta),
+  `Coefficient bias` = sprintf("%+.4f", inference$bias),
+  `Mean model SE` = sprintf("%.4f", inference$mean_model_SE),
+  `95% CI coverage` = sprintf("%.2f%%", 100 * inference$coverage),
+  check.names = FALSE
+)
+knitr::kable(
+  regression_display, align = c("r", "l", "r", "r", "r", "r"),
+  caption = "Regression summaries from 4,000 fits per configuration; the oracle uses the true exposure."
+)
+```
+
+With six-hour gaps, the lower-RMSE random forest reconstruction yielded a mean coefficient of approximately 0.554 and 28.8% coverage of nominal 95% confidence intervals. In contrast, $k$NN yielded a mean coefficient of approximately 0.506 and 95.1% coverage. This comparison describes **this particular simulation**, not a universal ranking of these algorithms.
+
+# Why reconstruction error and coefficient error differ
+
+The Frisch--Waugh--Lovell theorem expresses the coefficient of the reconstructed exposure after removing the linear contributions of the other regressors. Let $\mathbf{x}$ be the reference standardized exposure, $\widehat{\mathbf{x}}$ the reconstructed standardized exposure, and $M_Z$ the residual-maker matrix for the intercept, age, and sex. Then the expected fitted coefficient, conditional on these covariates, is
+
+$$
+E(\widehat{\beta}\mid \mathbf{x},\widehat{\mathbf{x}}, Z)
+= \beta\,\lambda,
+\qquad
+\lambda =
+\frac{\widehat{\mathbf{x}}^{\mathsf T} M_Z \mathbf{x}}
+     {\widehat{\mathbf{x}}^{\mathsf T} M_Z \widehat{\mathbf{x}}}.
+$$
+
+The factor $\lambda$ measures the conditional distortion of the coefficient in this model. It is not minimized by the hourly RMSE criterion. In the archived output, $\lambda$ was calculated separately within each masking replication and averaged over 20 replications.
+
+```{r lambda-table}
+lambda_display <- data.frame(
+  `Gap (hours)` = recon$gap_hours,
+  `Method` = recon$method,
+  `Mean lambda` = sprintf("%.4f", recon$mean_lambda),
+  `Projected beta` = sprintf("%.4f", recon$mean_projected_beta),
+  check.names = FALSE
+)
+knitr::kable(lambda_display,
+             caption = "Mean coefficient distortion factors and projected coefficients.")
+```
+
+```{r lambda-chart, fig.cap="Mean lambda distortion factors from the 20-mask primary analysis. The horizontal dashed line marks lambda = 1."}
+lambda_matrix <- xtabs(mean_lambda ~ method + gap_hours, data = recon)
+lambda_matrix <- lambda_matrix[method_order, c("1", "3", "6"), drop = FALSE]
+matplot(c(1, 3, 6), t(lambda_matrix), type = "b", pch = 15:18,
+        lty = 1:4, col = 1:4, xlab = "Length of missing block (hours)",
+        ylab = "Mean coefficient distortion factor (lambda)", xaxt = "n")
+axis(1, at = c(1, 3, 6))
+abline(h = 1, lty = 2, col = "gray40")
+legend("topleft", legend = rownames(lambda_matrix),
+       col = 1:4, lty = 1:4, pch = 15:18, cex = 0.8, bty = "n")
+```
+
+## Numerical verification against manuscript tables
+
+The following checks compare the higher-precision archived summaries against the already saved manuscript CSV tables. The tolerances reflect rounding in those tables, not uncertainty in the simulations.
+
+```{r verify-saved-tables}
+compare_rounded <- function(source, target, left, right,
+                            multiplier = 1, tolerance = 0.0051) {
+  joined <- merge(source, target,
+                  by.x = c("gap_hours", "method"),
+                  by.y = c("Gap_hours", "Method"),
+                  sort = FALSE)
+  stopifnot(nrow(joined) == nrow(target))
+  max_difference <- max(abs(joined[[left]] * multiplier - joined[[right]]))
+  stopifnot(is.finite(max_difference), max_difference <= tolerance)
+  invisible(max_difference)
+}
+
+for (pair in list(
+  c("mean_hourly_RMSE", "Hourly_RMSE"),
+  c("mean_exposure_RMSE", "Exposure_RMSE"),
+  c("mean_exposure_Bias", "Exposure_Bias")
+)) compare_rounded(recon, saved_table1, pair[1], pair[2])
+compare_rounded(recon, saved_table1,
+                "mean_projected_beta", "Projected_Beta",
+                tolerance = 0.000051)
+
+for (pair in list(
+  c("mean_beta", "Mean_Beta"),
+  c("bias", "Bias"),
+  c("empirical_SD", "Empirical_SD"),
+  c("mean_model_SE", "Mean_Model_SE"),
+  c("mean_CI_width", "Mean_CI_Width")
+)) compare_rounded(inference, saved_table2, pair[1], pair[2],
+                   tolerance = 0.000051)
+compare_rounded(inference, saved_table2,
+                "coverage", "Coverage_percent",
+                multiplier = 100, tolerance = 0.0051)
+
+cat("PASS: archived precision-level summaries agree with the saved",
+    "manuscript Tables 1 and 2 within their reporting precision.")
+```
+
+# Interpretation and scope
+
+These results show that reconstruction RMSE and downstream regression validity are not equivalent evaluation criteria. The particular coefficient distortion depends on how reconstruction affects the covariate-adjusted covariance and variance of the activity exposure.
+
+The results remain conditional on the selected complete NHANES windows, the fixed positions of the artificial gaps, the four specified reconstruction procedures, and the simulated linear outcome model. The reference activity measurements are the original **recorded hourly MIMS summaries**, not unobservable error-free physical activity. Under this study design, the saved results support numerical agreement between the full regression summaries and their manuscript tables; they do **not** by themselves constitute a clean-room rerun of the original 81 scripts.
+
+Chapter 5 now documents the **separate fixed-mask $\beta=0$ test** alongside the main simulation design. Future versions will add the distinct outcome-aware participant-level MICE experiment and the actual BMI application, without pooling their different designs.
+
+# Reproducibility and original source scripts
+
+The original data, saved RDS checkpoints, and 81 numbered scripts remain in the `Paper1_Wearable_Imputation` research folder. This page renders the **archived-result verification** pathway only; it is not a clean-session execution of all upstream simulations.
+
+Key script references are listed here to help readers trace the outputs to their generating code.
+
+```{r source-script-map}
+script_map <- data.frame(
+  `Original script` = c("40.R", "41.R", "43.R", "64.R", "70.R", "71.R", "72.R", "81.R", "62.R", "77.R", "78.R", "79.R", "80.R", "33.R", "34.R", "35.R", "36.R", "37.R", "38.R"),
+  `Saved analysis/output` = c(
+    "Combine the two NHANES cycles",
+    "Combined-cycle cleaning, valid days, clean hours, header time",
+    "Final eight-hour clean-window detector",
+    "20 replicated reference-window selections and reference exposures",
+    "20-mask primary reconstruction summary",
+    "FWL regression simulation function and numerical cross-checks",
+    "Primary outcome simulation and theory alignment summaries",
+    "Manuscript Tables 1 and 2",
+    "Fixed-mask beta=0 Type I error summary (separate design)",
+    "Participant-level outcome-aware PMM specification, 20 imputations and 200 outcomes",
+    "Participant alignment, Monte Carlo audit and missingness assignment generation",
+    "Additional assignment per-outcome checkpoint generator",
+    "MICE outcomes across four MCAR assignments and paired comparisons",
+    "BMI single-cycle reference cohort and initial linkage",
+    "Corrected adult eligibility and exclusions",
+    "BMI complete-window and reconstructed exposure construction",
+    "Survey-weighted BMI regression for 20 window selections",
+    "BMI-aware hourly MICE and survey pooling",
+    "Real BMI application summary"
+  ),
+  check.names = FALSE
+)
+knitr::kable(script_map, caption = "Original scripts that write relevant saved outputs.")
+```
+
+For a public GitHub Pages site, build `index.html` locally with the original project folder intact. Then publish the HTML and the small saved CSV summaries required to reproduce the page. Large `.rds` checkpoints and the NHANES `.xpt` data should not be committed to Git indiscriminately; instead, provide their official download links or a documented research archive as appropriate.
+
+## Next stages
+
+The separate fixed-mask $\beta=0$ experiment, participant-level outcome-aware MICE, and earlier observed BMI application are now documented above. Future work will audit the full computational environment, review methodological limitations, and prepare a public GitHub release of archived summaries and source scripts.
