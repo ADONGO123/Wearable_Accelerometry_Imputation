@@ -1,0 +1,13 @@
+# Always prevent accidental publication of private research data
+.Rhistory
+.Rproj.user/
+Data/
+*.xpt
+*.rds
+*.RData
+*.rda
+*.Rproj
+*~
+*.tmp
+.Renviron
+github_pages_release/

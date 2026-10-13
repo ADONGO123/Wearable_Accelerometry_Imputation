@@ -6,11 +6,23 @@ The website is a pre-rendered HTML document, not an R computation service.
 ## Scope and limitations
 
 The public repository holds a pre-rendered `index.html`, source `index.Rmd`,
-and approved aggregate CSVs with MD5 checksums.
+and approved aggregate CSVs with MD5 checksums and a verification script.
 The original numbered R scripts, raw NHANES XPT files, and RDS simulation
 checkpoints are kept in the original analysis archive pending code review
 and preparation of an executable clean-session pipeline.
 The public clone alone cannot currently knit `index.Rmd` from source.
+
+## Independent aggregate-result validation
+
+With R installed, from the repository root run:
+
+```r
+source('verify_public_results.R')
+```
+
+The script checks saved manuscript Tables 1 and 2 plus null, MICE,
+cohort, projection, and observed BMI summary consistency.
+It writes PUBLIC_VERIFICATION_REPORT.csv and does not refit models.
 It supports independent inspection of aggregate values, not a full rerun.
 
 ## Official input data documentation
